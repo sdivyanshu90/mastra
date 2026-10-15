@@ -4,6 +4,7 @@ import { createInterface } from 'node:readline';
 import { ErrorCategory, ErrorDomain, MastraError } from '@mastra/core/error';
 import { LoggerTransport } from '@mastra/core/logger';
 import type { BaseLogMessage, LogLevel } from '@mastra/core/logger';
+import { normalizeLogPagination } from '../pagination.js';
 
 export class FileTransport extends LoggerTransport {
   path: string;
@@ -82,8 +83,9 @@ export class FileTransport extends LoggerTransport {
     perPage: number;
     hasMore: boolean;
   }> {
+    const pagination = normalizeLogPagination(params);
     try {
-      return await this.#queryLogs(params || {});
+      return await this.#queryLogs({ ...params, ...pagination });
     } catch (error) {
       throw new MastraError(
         {
@@ -120,8 +122,9 @@ export class FileTransport extends LoggerTransport {
     perPage: number;
     hasMore: boolean;
   }> {
+    const pagination = normalizeLogPagination({ page, perPage });
     try {
-      return await this.#queryLogs({ runId, fromDate, toDate, logLevel, filters, page, perPage });
+      return await this.#queryLogs({ runId, fromDate, toDate, logLevel, filters, ...pagination });
     } catch (error) {
       throw new MastraError(
         {
@@ -146,8 +149,8 @@ export class FileTransport extends LoggerTransport {
     logLevel,
     filters,
     returnPaginationResults = true,
-    page: pageInput,
-    perPage: perPageInput,
+    page,
+    perPage,
   }: {
     runId?: string;
     fromDate?: Date;
@@ -155,11 +158,9 @@ export class FileTransport extends LoggerTransport {
     logLevel?: LogLevel;
     filters?: Record<string, any>;
     returnPaginationResults?: boolean;
-    page?: number;
-    perPage?: number;
+    page: number;
+    perPage: number;
   }) {
-    const page = pageInput === 0 ? 1 : (pageInput ?? 1);
-    const perPage = (perPageInput ?? 100) || 100;
     const start = (page - 1) * perPage;
     const end = start + perPage;
     const filterEntries = Object.entries(filters ?? {});
