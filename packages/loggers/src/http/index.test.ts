@@ -1,5 +1,5 @@
 import { LogLevel } from '@mastra/core/logger';
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, onTestFinished, vi } from 'vitest';
 import { PinoLogger } from '../pino';
 import { HttpTransport } from './index.js';
 
@@ -155,6 +155,50 @@ describe('HttpTransport', () => {
   });
 
   describe('error handling and retries', () => {
+    it.each(['circular', 'bigint', 'throwing toJSON'])('does not retry a %s serialization failure', async kind => {
+      const t = new HttpTransport({ ...defaultOptions, flushInterval: 60_000 });
+      onTestFinished(() => {
+        t.clearBuffer();
+        t.destroy();
+      });
+      const serializationError = new Error('Cannot serialize record');
+      const toJSON = vi.fn(() => {
+        throw serializationError;
+      });
+      const circular: Record<string, unknown> = {};
+      circular.self = circular;
+      const value = kind === 'circular' ? circular : kind === 'bigint' ? 1n : { toJSON };
+      t.write({ msg: 'unserializable', time: 1, value });
+      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+
+      const assertion = expect(t._flush()).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(1500);
+      await assertion;
+      const delays = setTimeoutSpy.mock.calls.map(call => call[1]);
+      setTimeoutSpy.mockRestore();
+
+      expect(delays).toEqual([]);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(t.getBufferedLogs()).toHaveLength(1);
+      if (kind === 'throwing toJSON') expect(toJSON).toHaveBeenCalledOnce();
+    });
+
+    it('reuses the serialized body across network retries', async () => {
+      let serializations = 0;
+      const toJSON = vi.fn(() => ({ attempt: ++serializations }));
+      transport.write({ msg: 'retry', time: 1, value: { toJSON } });
+      fetchMock.mockRejectedValueOnce(new Error('Network error'));
+
+      const flush = transport._flush();
+      await vi.advanceTimersByTimeAsync(defaultOptions.retryOptions.retryDelay);
+      await flush;
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(toJSON).toHaveBeenCalledOnce();
+      expect(fetchMock.mock.calls[0][1].body).toBe(fetchMock.mock.calls[1][1].body);
+      expect(transport.getBufferedLogs()).toEqual([]);
+    });
+
     it('should retry on HTTP errors', async () => {
       fetchMock
         .mockImplementationOnce(() =>
