@@ -103,6 +103,75 @@ describe('UpstashTransport', () => {
     ]);
   });
 
+  describe('pipeline command errors', () => {
+    const error = 'WRONGTYPE Operation against a key holding the wrong kind of value';
+    const response = (results: unknown[]) => ({ ok: true, json: async () => results });
+
+    it.each([1000, -1])('restores a rejected LPUSH batch with maxListLength %i', async maxListLength => {
+      const t = new UpstashTransport({ ...defaultOptions, maxListLength });
+      const logs = [{ msg: 'pending', time: 1 }];
+      t.logBuffer.push(...logs);
+      const lastFlush = t.lastFlush;
+      vi.setSystemTime(lastFlush + 100);
+      fetchMock.mockResolvedValueOnce(response(maxListLength > 0 ? [{ error }, { error }] : [{ error }]));
+
+      await expect(t._flush()).rejects.toThrow(error);
+
+      expect(t.logBuffer).toEqual(logs);
+      expect(t.lastFlush).toBe(lastFlush);
+      expect(t.droppedRecords).toBe(0);
+      expect(fetchMock).toHaveBeenCalledOnce();
+      clearInterval(t.flushIntervalId);
+    });
+
+    it('delivers a rejected batch on the next successful flush', async () => {
+      const logs = [{ msg: 'retry', time: 1 }];
+      transport.logBuffer.push(...logs);
+      fetchMock
+        .mockResolvedValueOnce(response([{ error }, { error }]))
+        .mockResolvedValueOnce(response([{ result: 1 }, { result: 'OK' }]));
+
+      await expect(transport._flush()).rejects.toThrow(error);
+      await transport._flush();
+
+      expect(transport.logBuffer).toEqual([]);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const requests = fetchMock.mock.calls.map(([, request]: any[]) => JSON.parse(request.body));
+      expect(requests[0]).toEqual(requests[1]);
+    });
+
+    it('reports a trim error without resending a successfully pushed batch', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const trimError = 'NOPERM this user has no permissions to run the LTRIM command';
+      transport.logBuffer.push({ msg: 'already stored', time: 1 });
+      vi.setSystemTime(transport.lastFlush + 100);
+      fetchMock.mockResolvedValueOnce(response([{ result: 1 }, { error: trimError }]));
+
+      await transport._flush();
+      await transport._flush();
+
+      expect(transport.logBuffer).toEqual([]);
+      expect(transport.lastFlush).toBe(Date.now());
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(consoleSpy).toHaveBeenCalledWith('Error trimming logs in Upstash:', trimError);
+      consoleSpy.mockRestore();
+    });
+
+    it('reports a rejected final LPUSH to the destroy callback', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logs = [{ msg: 'final batch', time: 1 }];
+      transport.logBuffer.push(...logs);
+      fetchMock.mockResolvedValueOnce(response([{ error }, { error }]));
+
+      const result = await new Promise<Error | null>(resolve => transport._destroy(null as any, resolve));
+
+      expect(result).toBeInstanceOf(Error);
+      expect(result?.message).toContain(error);
+      expect(transport.logBuffer).toEqual(logs);
+      consoleSpy.mockRestore();
+    });
+  });
+
   it('should properly clean up resources on destroy', () => {
     const clearIntervalSpy = vi.spyOn(global, 'clearInterval');
     const flushSpy = vi.spyOn(transport, '_flush').mockImplementation(() => Promise.resolve());

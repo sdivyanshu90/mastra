@@ -101,8 +101,16 @@ export class UpstashTransport extends LoggerTransport {
         commands.push(['LTRIM', this.listName, 0, this.maxListLength - 1]);
       }
 
-      await this.executeUpstashCommands(commands);
+      const response = await this.executeUpstashCommands(commands);
+      if (response?.[0]?.error) {
+        throw new Error(`Upstash LPUSH failed: ${response[0].error}`);
+      }
       this.lastFlush = now;
+
+      // LPUSH already persisted this batch. Report a failed trim without requeueing and duplicating the logs.
+      if (response?.[1]?.error) {
+        console.error('Error trimming logs in Upstash:', response[1].error);
+      }
     } catch (error) {
       // On error, put logs back in the buffer
       this.logBuffer.unshift(...logs);
