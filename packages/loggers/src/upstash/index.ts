@@ -54,6 +54,7 @@ export class UpstashTransport extends LoggerTransport {
         console.error('Error flushing logs to Upstash:', err);
       });
     }, this.flushInterval);
+    this.flushIntervalId.unref();
   }
 
   private async executeUpstashCommands(commands: any[][]): Promise<any> {
@@ -84,6 +85,7 @@ export class UpstashTransport extends LoggerTransport {
 
     this.flushPromise = this.flushBatch().finally(() => {
       this.flushPromise = null;
+      if (this.logBuffer.length === 0) this.flushIntervalId.unref();
     });
     return this.flushPromise;
   }
@@ -142,6 +144,7 @@ export class UpstashTransport extends LoggerTransport {
 
       // Add to buffer
       this.logBuffer.push(log);
+      this.flushIntervalId.ref();
 
       // Flush once a batch is ready, or earlier if the buffer limit is smaller than a batch
       if (this.logBuffer.length >= Math.min(this.batchSize, this.maxBufferSize)) {

@@ -94,6 +94,7 @@ export class HttpTransport extends LoggerTransport {
 
     // Start flush interval
     this.flushIntervalId = setInterval(() => this.requestFlush(), this.flushInterval);
+    this.flushIntervalId.unref();
   }
 
   private async makeHttpRequest(data: any): Promise<Response> {
@@ -182,6 +183,7 @@ export class HttpTransport extends LoggerTransport {
     this.flushRequested = false;
     const flush = this.flushBatch().finally(() => {
       this.flushPromise = null;
+      if (this.logBuffer.length === 0) this.flushIntervalId.unref();
     });
     this.flushPromise = flush;
     // Flushes requested while this request was in flight only got this promise back, so send their logs now,
@@ -246,6 +248,7 @@ export class HttpTransport extends LoggerTransport {
 
       // Add to buffer
       this.logBuffer.push(log);
+      this.flushIntervalId.ref();
       this.enforceBufferLimit();
 
       // Flush if buffer reaches batch size
@@ -359,6 +362,7 @@ export class HttpTransport extends LoggerTransport {
 
   public clearBuffer(): void {
     this.logBuffer = [];
+    this.flushIntervalId.unref();
   }
 
   public getDroppedLogCount(): number {
