@@ -8,15 +8,15 @@
  * on the unmaintained npm `fastembed` package.
  */
 
-import { AddedToken, Tokenizer } from '@anush008/tokenizers';
 import fs from 'node:fs';
 import type { PathLike } from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { ReadableStream } from 'node:stream/web';
-import * as ort from 'onnxruntime-node';
+import { AddedToken, Tokenizer } from '@anush008/tokenizers';
 import { downloadFile } from '@huggingface/hub';
+import * as ort from 'onnxruntime-node';
 
 export enum ExecutionProvider {
   CPU = 'cpu',
@@ -79,6 +79,12 @@ interface SparseModelInfo {
 }
 
 type ModelInput = Record<string, ort.Tensor>;
+
+function validateBatchSize(batchSize: number): void {
+  if (!Number.isSafeInteger(batchSize) || batchSize < 1) {
+    throw new RangeError('batchSize must be a positive safe integer');
+  }
+}
 
 function normalize(v: number[]): number[] {
   const norm = Math.sqrt(v.reduce((acc, val) => acc + val * val, 0));
@@ -261,6 +267,7 @@ export class FlagEmbedding extends Embedding {
    * Counts texts longer than the model's token window. `embed()` silently truncates these to `maxLength`.
    */
   async countTruncated(textStrings: string[], batchSize: number = 256): Promise<{ count: number; maxLength: number }> {
+    validateBatchSize(batchSize);
     let count = 0;
     let maxLength = 0;
     for (let i = 0; i < textStrings.length; i += batchSize) {
@@ -327,6 +334,7 @@ export class FlagEmbedding extends Embedding {
   }
 
   async *embed(textStrings: string[], batchSize: number = 256) {
+    validateBatchSize(batchSize);
     for (let i = 0; i < textStrings.length; i += batchSize) {
       const batchTexts = textStrings.slice(i, i + batchSize);
 
@@ -511,6 +519,7 @@ export class SparseTextEmbedding extends SparseEmbedding {
   }
 
   async *embed(textStrings: string[], batchSize: number = 256) {
+    validateBatchSize(batchSize);
     for (let i = 0; i < textStrings.length; i += batchSize) {
       const batchTexts = textStrings.slice(i, i + batchSize);
 
