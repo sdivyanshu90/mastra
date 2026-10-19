@@ -1,8 +1,8 @@
-import { customProvider as customProviderV2 } from '@internal/ai-sdk-v5';
 import { customProvider as customProviderLegacy } from '@internal/ai-sdk-v4';
-import type { EmbeddingModelV3 } from '@internal/ai-v6';
-import type { EmbeddingModel as EmbeddingModelV2 } from '@internal/ai-sdk-v5';
 import type { EmbeddingModel as EmbeddingModelV1 } from '@internal/ai-sdk-v4';
+import { customProvider as customProviderV2 } from '@internal/ai-sdk-v5';
+import type { EmbeddingModel as EmbeddingModelV2 } from '@internal/ai-sdk-v5';
+import type { EmbeddingModelV3 } from '@internal/ai-v6';
 import { customProvider as customProviderV3 } from '@internal/ai-v6';
 import { getCachedModel, warmupFastEmbedModels, type FastEmbedModelType } from './model-cache.js';
 
@@ -42,6 +42,9 @@ async function generateEmbeddings(values: string[], modelType: FastEmbedModelTyp
   }
 
   if (allResults.length === 0) throw new Error('No embeddings generated');
+  if (allResults.length !== values.length) {
+    throw new Error(`FastEmbed embedding count mismatch: expected ${values.length}, received ${allResults.length}`);
+  }
 
   return {
     embeddings: allResults,

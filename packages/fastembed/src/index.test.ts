@@ -98,3 +98,63 @@ test('counts truncation on the prefixed e5 inputs', async () => {
 
   expect(mocks.countTruncated).toHaveBeenCalledWith(['passage: hello']);
 });
+
+const providerModels = [
+  'smallLegacy',
+  'baseLegacy',
+  'smallV2',
+  'baseV2',
+  'small',
+  'base',
+  'multilingualE5LargeQuery',
+  'multilingualE5LargePassage',
+] as const;
+
+test.each(providerModels)('%s rejects fewer embeddings than input texts', async modelName => {
+  mocks.embed.mockImplementationOnce(() =>
+    (async function* () {
+      yield [[0.1, 0.2, 0.3]];
+    })(),
+  );
+  const { fastembed } = await import('./index.js');
+
+  await expect(fastembed[modelName].doEmbed({ values: ['first', 'second'] })).rejects.toThrow(
+    'FastEmbed embedding count mismatch: expected 2, received 1',
+  );
+  expect(mocks.countTruncated).not.toHaveBeenCalled();
+});
+
+test.each(providerModels)('%s rejects more embeddings than input texts', async modelName => {
+  mocks.embed.mockImplementationOnce(() =>
+    (async function* () {
+      yield [[0.1], [0.2]];
+      yield [[0.3]];
+    })(),
+  );
+  const { fastembed } = await import('./index.js');
+
+  await expect(fastembed[modelName].doEmbed({ values: ['first', 'second'] })).rejects.toThrow(
+    'FastEmbed embedding count mismatch: expected 2, received 3',
+  );
+});
+
+test.each(providerModels)('%s preserves embedding order across valid batches', async modelName => {
+  mocks.embed.mockImplementationOnce(() =>
+    (async function* () {
+      yield [[0.1, 0.2]];
+      yield [
+        [0.3, 0.4],
+        [0.5, 0.6],
+      ];
+    })(),
+  );
+  const { fastembed } = await import('./index.js');
+
+  const result = await fastembed[modelName].doEmbed({ values: ['first', 'second', 'third'] });
+
+  expect(result.embeddings).toEqual([
+    [0.1, 0.2],
+    [0.3, 0.4],
+    [0.5, 0.6],
+  ]);
+});
