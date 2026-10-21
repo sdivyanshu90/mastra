@@ -8,15 +8,15 @@
  * on the unmaintained npm `fastembed` package.
  */
 
-import { AddedToken, Tokenizer } from '@anush008/tokenizers';
 import fs from 'node:fs';
 import type { PathLike } from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { ReadableStream } from 'node:stream/web';
-import * as ort from 'onnxruntime-node';
+import { AddedToken, Tokenizer } from '@anush008/tokenizers';
 import { downloadFile } from '@huggingface/hub';
+import * as ort from 'onnxruntime-node';
 
 export enum ExecutionProvider {
   CPU = 'cpu',
@@ -86,10 +86,22 @@ function normalize(v: number[]): number[] {
   return v.map(val => val / Math.max(norm, epsilon));
 }
 
-function getEmbeddings(data: number[], dimensions: [number, number, number]): number[][] {
+function getEmbeddings(data: number[], dimensions: [number, number, number], attentionMask?: bigint[][]): number[][] {
   const [x, _y, z] = dimensions;
   return new Array(x).fill(undefined).map((_, index) => {
     const startIndex = index * _y * z;
+    if (attentionMask) {
+      const embedding = new Array<number>(z).fill(0);
+      let tokenCount = 0;
+      for (let tokenIndex = 0; tokenIndex < _y; tokenIndex++) {
+        if (attentionMask[index]![tokenIndex] === 0n) continue;
+        tokenCount++;
+        for (let dim = 0; dim < z; dim++) {
+          embedding[dim]! += data[startIndex + tokenIndex * z + dim]!;
+        }
+      }
+      return embedding.map(value => value / Math.max(tokenCount, 1));
+    }
     const endIndex = startIndex + z;
     return data.slice(startIndex, endIndex);
   });
@@ -382,9 +394,11 @@ export class FlagEmbedding extends Embedding {
       const output = await this.session.run(inputs);
 
       const lastHiddenState = output.last_hidden_state!;
+      const meanPooling = this.model === EmbeddingModel.AllMiniLML6V2 || this.model === EmbeddingModel.MLE5Large;
       const embeddings = getEmbeddings(
         lastHiddenState.data as unknown[] as number[],
         lastHiddenState.dims as [number, number, number],
+        meanPooling ? maskArray : undefined,
       );
 
       yield embeddings.map(normalize);
