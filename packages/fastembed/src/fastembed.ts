@@ -8,15 +8,15 @@
  * on the unmaintained npm `fastembed` package.
  */
 
-import { AddedToken, Tokenizer } from '@anush008/tokenizers';
 import fs from 'node:fs';
 import type { PathLike } from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { ReadableStream } from 'node:stream/web';
-import * as ort from 'onnxruntime-node';
+import { AddedToken, Tokenizer } from '@anush008/tokenizers';
 import { downloadFile } from '@huggingface/hub';
+import * as ort from 'onnxruntime-node';
 
 export enum ExecutionProvider {
   CPU = 'cpu',
@@ -488,7 +488,7 @@ export class SparseTextEmbedding extends SparseEmbedding {
       return modelDir;
     }
 
-    fs.mkdirSync(modelDir, { mode: 0o755 });
+    const tmpDir = fs.mkdtempSync(`${modelDir}.tmp-`);
 
     const filesToDownload = [
       'onnx/model.onnx',
@@ -498,21 +498,37 @@ export class SparseTextEmbedding extends SparseEmbedding {
       'special_tokens_map.json',
     ];
 
-    for (const fileName of filesToDownload) {
-      const outputPath = path.join(modelDir, fileName);
-      const outputDir = path.dirname(outputPath);
+    try {
+      for (const fileName of filesToDownload) {
+        const outputPath = path.join(tmpDir, fileName);
+        const outputDir = path.dirname(outputPath);
 
-      if (!fs.existsSync(outputDir)) {
-        fs.mkdirSync(outputDir, { recursive: true, mode: 0o755 });
+        if (!fs.existsSync(outputDir)) {
+          fs.mkdirSync(outputDir, { recursive: true, mode: 0o755 });
+        }
+
+        const downloaded = await downloadFile({
+          repo: model,
+          path: fileName,
+        });
+
+        if (!downloaded) throw new Error(`Model file not found in ${model}: ${fileName}`);
+        await pipeline(Readable.fromWeb(downloaded.stream() as ReadableStream), fs.createWriteStream(outputPath));
       }
-
-      const downloaded = await downloadFile({
-        repo: model,
-        path: fileName,
-      });
-
-      if (!downloaded) throw new Error(`Model file not found in ${model}: ${fileName}`);
-      await pipeline(Readable.fromWeb(downloaded.stream() as ReadableStream), fs.createWriteStream(outputPath));
+      try {
+        fs.renameSync(tmpDir, modelDir);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        // Another concurrent download already published this model.
+        if ((code === 'EEXIST' || code === 'ENOTEMPTY') && fs.existsSync(modelDir)) {
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+          return modelDir;
+        }
+        throw error;
+      }
+    } catch (error) {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      throw error;
     }
 
     return modelDir;
