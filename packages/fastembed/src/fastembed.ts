@@ -86,6 +86,13 @@ function normalize(v: number[]): number[] {
   return v.map(val => val / Math.max(norm, epsilon));
 }
 
+function getOutputDimensions(tensor: ort.Tensor, outputName: string): [number, number, number] {
+  if (tensor.dims.length !== 3) {
+    throw new Error(`Expected model output "${outputName}" to have 3 dimensions, received [${tensor.dims.join(', ')}]`);
+  }
+  return tensor.dims as [number, number, number];
+}
+
 function getEmbeddings(data: number[], dimensions: [number, number, number], masks?: bigint[][]): number[][] {
   const [batchSize, sequenceLength, hiddenSize] = dimensions;
   return Array.from({ length: batchSize }, (_, batchIndex) => {
@@ -394,7 +401,7 @@ export class FlagEmbedding extends Embedding {
       const lastHiddenState = output.last_hidden_state!;
       const embeddings = getEmbeddings(
         lastHiddenState.data as unknown[] as number[],
-        lastHiddenState.dims as [number, number, number],
+        getOutputDimensions(lastHiddenState, 'last_hidden_state'),
         this.model === EmbeddingModel.AllMiniLML6V2 || this.model === EmbeddingModel.MLE5Large ? maskArray : undefined,
       );
 
@@ -580,9 +587,9 @@ export class SparseTextEmbedding extends SparseEmbedding {
 
       // SPLADE postprocessing: log(1 + ReLU(logits))
       const outputTensor = output.output!;
+      const dims = getOutputDimensions(outputTensor, 'output');
       // @ts-expect-error cpuData exists at runtime on onnxruntime Tensor
       const logits = outputTensor.cpuData as Float32Array;
-      const dims = outputTensor.dims as [number, number, number];
       const [currentBatchSize, seqLen, currentVocabSize] = dims;
 
       const sparseVectors: SparseVector[] = [];
