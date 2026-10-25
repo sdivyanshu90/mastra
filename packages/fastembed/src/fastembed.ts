@@ -217,6 +217,12 @@ function loadTokenizerFromDir(modelDir: PathLike, maxLength: number): Tokenizer 
   return tokenizer;
 }
 
+function assertValidMaxLength(maxLength: number): void {
+  if (!Number.isSafeInteger(maxLength) || maxLength <= 0) {
+    throw new RangeError(`maxLength must be a positive safe integer, received ${String(maxLength)}`);
+  }
+}
+
 function assertValidBatchSize(batchSize: number): void {
   if (!Number.isSafeInteger(batchSize) || batchSize <= 0) {
     throw new RangeError(`batchSize must be a positive safe integer, received ${String(batchSize)}`);
@@ -243,6 +249,7 @@ export class FlagEmbedding extends Embedding {
     modelAbsoluteDirPath = '',
     modelName = '',
   }: Partial<InitOptions> = {}) {
+    assertValidMaxLength(maxLength);
     if (model === EmbeddingModel.CUSTOM) {
       if (!modelAbsoluteDirPath) {
         throw new Error('For custom model, modelAbsoluteDirPath is required in FlagEmbedding.init');
@@ -448,6 +455,7 @@ export class SparseTextEmbedding extends SparseEmbedding {
     modelAbsoluteDirPath = '',
     modelName = '',
   }: Partial<InitSparseOptions> = {}) {
+    assertValidMaxLength(maxLength);
     if (model === SparseEmbeddingModel.CUSTOM) {
       if (!modelAbsoluteDirPath) {
         throw new Error('For custom model, modelAbsoluteDirPath is required in SparseTextEmbedding.init');
