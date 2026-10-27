@@ -80,6 +80,38 @@ describe.each(['dense', 'sparse'] as const)('%s model output', kind => {
     );
   });
 
+  function writeModelWithValue(value: number) {
+    const bytes = Buffer.from(kind === 'dense' ? denseModelBytes : sparseModelBytes);
+    // ONNX TensorProto initializer named "one": name field, then four-byte raw_data.
+    const marker = Buffer.from([0x42, 3, 0x6f, 0x6e, 0x65, 0x4a, 4]);
+    const offset = bytes.indexOf(marker);
+    if (offset < 0) throw new Error('Fixture initializer was not found');
+    bytes.writeFloatLE(value, offset + marker.length);
+    fs.writeFileSync(path.join(modelDir, kind === 'dense' ? 'model.onnx' : 'onnx/model.onnx'), bytes);
+  }
+
+  it.each([NaN, Infinity, -Infinity])('rejects a non-finite model value (%s)', async value => {
+    writeModelWithValue(value);
+    const embedding = await initialize();
+    await expect(embedding.embed(['one three']).next()).rejects.toThrow(/non-finite/);
+  });
+
+  it.each([0, -1])('preserves finite zero and negative model values (%s)', async value => {
+    writeModelWithValue(value);
+    const embedding = await initialize();
+    const result = (await embedding.embed(['one three']).next()).value!;
+    if (kind === 'dense') {
+      const vectors = result as number[][];
+      expect(vectors[0]![0]).toBeCloseTo(1 / Math.sqrt(1 + value * value));
+      expect(vectors[0]![1]).toBeCloseTo(value / Math.sqrt(1 + value * value));
+    } else {
+      const vectors = result as { indices: number[]; values: number[] }[];
+      expect(vectors[0]!.indices).toEqual([0]);
+      expect(vectors[0]!.values).toHaveLength(1);
+      expect(vectors[0]!.values[0]).toBeCloseTo(Math.log(4));
+    }
+  });
+
   it('embeds a batch with a valid three-dimensional output', async () => {
     const embedding = await initialize();
     const result = (await embedding.embed(['one three', 'two four']).next()).value!;

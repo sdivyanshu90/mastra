@@ -81,6 +81,9 @@ interface SparseModelInfo {
 type ModelInput = Record<string, ort.Tensor>;
 
 function normalize(v: number[]): number[] {
+  if (v.some(value => !Number.isFinite(value))) {
+    throw new Error('Dense embedding contains a non-finite value');
+  }
   const norm = Math.sqrt(v.reduce((acc, val) => acc + val * val, 0));
   const epsilon = 1e-12;
   return v.map(val => val / Math.max(norm, epsilon));
@@ -612,6 +615,9 @@ export class SparseTextEmbedding extends SparseEmbedding {
             for (let vocabIdx = 0; vocabIdx < currentVocabSize; vocabIdx++) {
               const logitIdx = batchIdx * seqLen * currentVocabSize + seqIdx * currentVocabSize + vocabIdx;
               const logitValue = logits[logitIdx]!;
+              if (!Number.isFinite(logitValue)) {
+                throw new Error('Sparse model output contains a non-finite value');
+              }
               const reluValue = Math.max(0, logitValue);
               const logValue = Math.log(1 + reluValue);
               valuesArr[vocabIdx] = Math.max(valuesArr[vocabIdx]!, logValue);
