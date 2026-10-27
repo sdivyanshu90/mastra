@@ -229,6 +229,16 @@ function assertValidMaxLength(maxLength: number): void {
   }
 }
 
+function getModelOutput(outputs: Record<string, ort.Tensor>, outputName: string): ort.Tensor {
+  const tensor = outputs[outputName];
+  if (!tensor) {
+    throw new Error(
+      `Expected model output "${outputName}" was not found. Available outputs: ${Object.keys(outputs).join(', ') || '(none)'}`,
+    );
+  }
+  return tensor;
+}
+
 // Pooling indexes token-level [batch, sequence, features] output; other ranks would silently yield empty vectors.
 function getOutputDimensions(outputName: string, tensor: ort.Tensor): [number, number, number] {
   if (tensor.dims.length !== 3) {
@@ -406,7 +416,7 @@ export class FlagEmbedding extends Embedding {
 
       const output = await this.session.run(inputs);
 
-      const lastHiddenState = output.last_hidden_state!;
+      const lastHiddenState = getModelOutput(output, 'last_hidden_state');
       const embeddings = getEmbeddings(
         lastHiddenState.data as unknown[] as number[],
         getOutputDimensions('last_hidden_state', lastHiddenState),
@@ -595,7 +605,7 @@ export class SparseTextEmbedding extends SparseEmbedding {
       const output = await this.session.run(inputs);
 
       // SPLADE postprocessing: log(1 + ReLU(logits))
-      const outputTensor = output.output!;
+      const outputTensor = getModelOutput(output, 'output');
       // @ts-expect-error cpuData exists at runtime on onnxruntime Tensor
       const logits = outputTensor.cpuData as Float32Array;
       const [currentBatchSize, seqLen, currentVocabSize] = getOutputDimensions('output', outputTensor);

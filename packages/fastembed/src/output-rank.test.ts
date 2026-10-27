@@ -62,6 +62,17 @@ beforeEach(() => {
   );
 });
 
+const renamedModels = {
+  dense: Buffer.from(
+    'CAkSDmZhc3RlbWJlZC10ZXN0OqADCiEKCWlucHV0X2lkcxIDaWRzIgRDYXN0KgkKAnRvGAGgAQIKFwoDaWRzCgR6ZXJvEgV6ZXJvcyIDTXVsChcKBXplcm9zCgNvbmUSBG9uZXMiA0FkZAocCgNpZHMKBGF4ZXMSBGlkczMiCVVuc3F1ZWV6ZQoeCgRvbmVzCgRheGVzEgVvbmVzMyIJVW5zcXVlZXplCjYKBGlkczMKBW9uZXMzEhJzZW50ZW5jZV9lbWJlZGRpbmciBkNvbmNhdCoLCgRheGlzGAKgAQISDnRva2VuLWZlYXR1cmVzKg4QAUIEemVyb0oEAAAAACoNEAFCA29uZUoEAACAPyoUCAEQB0IEYXhlc0oIAgAAAAAAAABaKAoJaW5wdXRfaWRzEhsKGQgHEhUKBxIFYmF0Y2gKChIIc2VxdWVuY2VaLQoOYXR0ZW50aW9uX21hc2sSGwoZCAcSFQoHEgViYXRjaAoKEghzZXF1ZW5jZWI1ChJzZW50ZW5jZV9lbWJlZGRpbmcSHwodCAESGQoHEgViYXRjaAoKEghzZXF1ZW5jZQoCCAJCAhAN',
+    'base64',
+  ),
+  sparse: Buffer.from(
+    'CAkSDmZhc3RlbWJlZC10ZXN0OpwDCiEKCWlucHV0X2lkcxIDaWRzIgRDYXN0KgkKAnRvGAGgAQIKFwoDaWRzCgR6ZXJvEgV6ZXJvcyIDTXVsChcKBXplcm9zCgNvbmUSBG9uZXMiA0FkZAocCgNpZHMKBGF4ZXMSBGlkczMiCVVuc3F1ZWV6ZQoeCgRvbmVzCgRheGVzEgVvbmVzMyIJVW5zcXVlZXplCjYKBGlkczMKBW9uZXMzEhJzZW50ZW5jZV9lbWJlZGRpbmciBkNvbmNhdCoLCgRheGlzGAKgAQISDnRva2VuLWZlYXR1cmVzKg4QAUIEemVyb0oEAAAAACoNEAFCA29uZUoEAACAPyoUCAEQB0IEYXhlc0oIAgAAAAAAAABaKAoJaW5wdXRfaWRzEhsKGQgHEhUKBxIFYmF0Y2gKChIIc2VxdWVuY2VaKQoKaW5wdXRfbWFzaxIbChkIBxIVCgcSBWJhdGNoCgoSCHNlcXVlbmNlYjUKEnNlbnRlbmNlX2VtYmVkZGluZxIfCh0IARIZCgcSBWJhdGNoCgoSCHNlcXVlbmNlCgIIAkICEA0=',
+    'base64',
+  ),
+};
+
 describe.each(['dense', 'sparse'] as const)('%s model output', kind => {
   async function initialize() {
     const options = { modelAbsoluteDirPath: modelDir, modelName: 'model.onnx', maxLength: 4 };
@@ -79,6 +90,20 @@ describe.each(['dense', 'sparse'] as const)('%s model output', kind => {
       `Expected model output "${outputName}" to have 3 dimensions, received [2, 4]`,
     );
   });
+
+  it.each(['embed', 'passageEmbed', 'queryEmbed'] as const)(
+    'explains a missing required output through %s',
+    async method => {
+      fs.writeFileSync(path.join(modelDir, kind === 'dense' ? 'model.onnx' : 'onnx/model.onnx'), renamedModels[kind]);
+      const embedding = await initialize();
+      const outputName = kind === 'dense' ? 'last_hidden_state' : 'output';
+      const result =
+        method === 'queryEmbed' ? embedding.queryEmbed('one three') : embedding[method](['one three']).next();
+      await expect(result).rejects.toThrow(
+        `Expected model output "${outputName}" was not found. Available outputs: sentence_embedding`,
+      );
+    },
+  );
 
   it('embeds a batch with a valid three-dimensional output', async () => {
     const embedding = await initialize();
