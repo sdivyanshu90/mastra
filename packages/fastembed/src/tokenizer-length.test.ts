@@ -117,3 +117,46 @@ describe('invalid explicit token limits', () => {
     },
   );
 });
+
+describe.each([
+  { name: 'string', padToken: '[PAD]' },
+  {
+    name: 'serialized AddedToken',
+    padToken: {
+      __type: 'AddedToken',
+      content: '[PAD]',
+      single_word: false,
+      lstrip: false,
+      rstrip: false,
+      normalized: false,
+      special: true,
+    },
+  },
+])('$name padding token', ({ padToken }) => {
+  it.each(['dense', 'sparse'] as const)('initializes and embeds padded %s inputs', async kind => {
+    fs.writeFileSync(
+      path.join(modelDir, 'tokenizer_config.json'),
+      JSON.stringify({ model_max_length: 4, pad_token: padToken }),
+    );
+    const options = { modelAbsoluteDirPath: modelDir, modelName: 'model.onnx', maxLength: 4 };
+    if (kind === 'dense') {
+      const embedding = await FlagEmbedding.init({ ...options, model: EmbeddingModel.CUSTOM });
+      const result = (await embedding.embed(['one', 'two three']).next()).value!;
+      expect(result).toHaveLength(2);
+      expect(result[0]![0]).toBeCloseTo(1 / Math.sqrt(2));
+      expect(result[0]![1]).toBeCloseTo(1 / Math.sqrt(2));
+      expect(result[1]![0]).toBeCloseTo(2 / Math.sqrt(5));
+      expect(result[1]![1]).toBeCloseTo(1 / Math.sqrt(5));
+    } else {
+      const embedding = await SparseTextEmbedding.init({ ...options, model: SparseEmbeddingModel.CUSTOM });
+      const result = (await embedding.embed(['one', 'two three']).next()).value!;
+      expect(result).toHaveLength(2);
+      expect(result[0]!.indices).toEqual([0, 1]);
+      expect(result[1]!.indices).toEqual([0, 1]);
+      expect(result[0]!.values[0]).toBeCloseTo(Math.log(2));
+      expect(result[1]!.values[0]).toBeCloseTo(Math.log(4));
+      expect(result[0]!.values[1]).toBeCloseTo(Math.log(2));
+      expect(result[1]!.values[1]).toBeCloseTo(Math.log(2));
+    }
+  });
+});
