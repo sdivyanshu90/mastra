@@ -2047,6 +2047,20 @@ describe('MDocument', () => {
 
   describe('chunkJson', () => {
     describe('Unicode handling', () => {
+      it.each([undefined, true, false])('preserves JSON values with ensureAscii=%s', async ensureAscii => {
+        const input = {
+          'café 🌍': { text: '你好 🌍', literal: '\\u00e9', escaped: '"\\\n\t' },
+          items: ['é', '\\u4f60', null, 42, true],
+        };
+        const doc = MDocument.fromJSON(JSON.stringify(input));
+        await doc.chunk({ strategy: 'json', maxSize: 1000, ensureAscii });
+        const chunks = doc.getText();
+        expect(Object.assign({}, ...chunks.map(chunk => JSON.parse(chunk)))).toEqual(input);
+        if (ensureAscii !== false) {
+          expect(chunks.join('')).not.toMatch(/[^\x00-\x7f]/);
+        }
+      });
+
       it('should handle Unicode characters correctly', async () => {
         const input = {
           key1: '你好',
@@ -2066,15 +2080,7 @@ describe('MDocument', () => {
 
         const combined = doc
           .getText()
-          .map(chunk => {
-            const c = JSON.parse(chunk);
-            const retVal: Record<string, string> = {};
-            Object.entries(c).forEach(([key, value]) => {
-              retVal[key] = JSON.parse(`"${value as string}"`);
-            });
-
-            return retVal;
-          })
+          .map(chunk => JSON.parse(chunk))
           .reduce((acc, curr) => ({ ...acc, ...curr }), {});
 
         expect(combined?.key1?.charCodeAt(0)).toBe('你'.charCodeAt(0));
