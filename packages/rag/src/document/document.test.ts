@@ -2046,6 +2046,24 @@ describe('MDocument', () => {
   });
 
   describe('chunkJson', () => {
+    it.each([undefined, 20, 1])('preserves array items with minSize=%s', async minSize => {
+      const input = { items: ['aaaa', 'bbbb', 'c'] };
+      const doc = MDocument.fromJSON(JSON.stringify(input));
+      await doc.chunk({ strategy: 'json', maxSize: 24, minSize });
+      const chunks = doc.getText();
+      expect(chunks.flatMap(chunk => JSON.parse(chunk).items)).toEqual(input.items);
+      for (const chunk of chunks) expect(chunk.length).toBeLessThanOrEqual(24);
+    });
+
+    it.each([undefined, 25, 1])('preserves nested fields with minSize=%s', async minSize => {
+      const input = { item: { a: 'aaaa', b: 'bbbb', c: 'c' } };
+      const doc = MDocument.fromJSON(JSON.stringify(input));
+      await doc.chunk({ strategy: 'json', maxSize: 28, minSize });
+      const chunks = doc.getText();
+      expect(Object.assign({}, ...chunks.map(chunk => JSON.parse(chunk).item))).toEqual(input.item);
+      for (const chunk of chunks) expect(chunk.length).toBeLessThanOrEqual(28);
+    });
+
     describe('Unicode handling', () => {
       it('should handle Unicode characters correctly', async () => {
         const input = {
