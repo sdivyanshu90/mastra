@@ -149,6 +149,66 @@ describe('MDocument', () => {
   });
 
   describe('chunkCharacter', () => {
+    describe.each(['character', 'recursive'] as const)('%s regex capture groups', strategy => {
+      it.each(['start', 'end'] as const)('preserves text with separators at %s', async separatorPosition => {
+        const text = ', alpha; beta,; gamma;';
+        const doc = MDocument.fromText(text);
+        await doc.chunk({
+          strategy,
+          ...(strategy === 'character' ? { separator: '(,|;)\\s*' } : { separators: ['(,|;)\\s*'] }),
+          isSeparatorRegex: true,
+          separatorPosition,
+          maxSize: 12,
+          overlap: 0,
+          stripWhitespace: false,
+        });
+        expect(doc.getText().join('')).toBe(text);
+      });
+
+      it('preserves numbered backreferences in separator patterns', async () => {
+        const text = 'alpha,,beta;;gamma';
+        const doc = MDocument.fromText(text);
+        await doc.chunk({
+          strategy,
+          ...(strategy === 'character' ? { separator: '(,|;)\\1' } : { separators: ['(,|;)\\1'] }),
+          isSeparatorRegex: true,
+          separatorPosition: 'end',
+          maxSize: 8,
+          overlap: 0,
+          stripWhitespace: false,
+        });
+        expect(doc.getText()).toEqual(['alpha,,', 'beta;;', 'gamma']);
+      });
+    });
+
+    it.each([undefined, 'start', 'end'] as const)(
+      'handles zero-width regex separators at %s',
+      async separatorPosition => {
+        const doc = MDocument.fromText('abc');
+        await doc.chunk({
+          strategy: 'character',
+          separator: '^|(?=b)|(?=c)|$',
+          isSeparatorRegex: true,
+          separatorPosition,
+          maxSize: 100,
+          overlap: 0,
+        });
+        expect(doc.getText()).toEqual(['a', 'b', 'c']);
+      },
+    );
+
+    it('excludes optional capture groups when discarding regex separators', async () => {
+      const doc = MDocument.fromText('alpha, beta; gamma');
+      await doc.chunk({
+        strategy: 'character',
+        separator: '(,)?;?\\s+',
+        isSeparatorRegex: true,
+        maxSize: 100,
+        overlap: 0,
+      });
+      expect(doc.getText()).toEqual(['alpha', 'beta', 'gamma']);
+    });
+
     it('should split text on simple separator', async () => {
       const text = 'Hello world\n\nHow are you\n\nI am fine';
 

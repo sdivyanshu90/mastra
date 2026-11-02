@@ -8,42 +8,18 @@ function splitTextWithRegex(text: string, separator: string, separatorPosition?:
     return text.split('');
   }
 
-  if (!separatorPosition) {
-    return text.split(new RegExp(separator)).filter(s => s !== '');
-  }
-
-  if (!text) {
-    return [];
-  }
-
-  // Split with capturing group to keep separators
-  const splits = text.split(new RegExp(`(${separator})`));
   const result: string[] = [];
+  let lastIndex = 0;
 
-  if (separatorPosition === 'end') {
-    // Process all complete pairs
-    for (let i = 0; i < splits.length - 1; i += 2) {
-      if (i + 1 < splits.length) {
-        // Current text + separator
-        const chunk = splits[i] + (splits[i + 1] || '');
-        if (chunk) result.push(chunk);
-      }
-    }
-    // Handle the last element if it exists and isn't a separator
-    if (splits.length % 2 === 1 && splits[splits.length - 1]) {
-      result.push(splits?.[splits.length - 1]!);
-    }
-  } else {
-    if (splits[0]) result.push(splits[0]);
-
-    for (let i = 1; i < splits.length - 1; i += 2) {
-      const separator = splits[i];
-      const text = splits[i + 1] ?? '';
-      if (separator) {
-        result.push(separator + text);
-      }
-    }
+  // Match the original pattern without adding capture groups or changing backreferences.
+  for (const match of text.matchAll(new RegExp(separator, 'g'))) {
+    if (match[0] === '' && (match.index === 0 || match.index === text.length)) continue;
+    const matchEnd = match.index + match[0].length;
+    const splitAt = separatorPosition === 'end' ? matchEnd : match.index;
+    result.push(text.slice(lastIndex, splitAt));
+    lastIndex = separatorPosition ? splitAt : matchEnd;
   }
+  result.push(text.slice(lastIndex));
 
   return result.filter(s => s !== '');
 }
