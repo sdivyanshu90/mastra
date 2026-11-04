@@ -80,6 +80,7 @@ export class GraphRAG {
       throw new Error('Both source and target nodes must exist');
     }
     this.edges.push(edge);
+    if (edge.source === edge.target) return;
     // Add reverse edge
     this.edges.push({
       source: edge.target,

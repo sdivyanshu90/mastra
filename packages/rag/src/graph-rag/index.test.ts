@@ -4,6 +4,21 @@ import type { GraphChunk, GraphEdge, GraphEmbedding, GraphNode } from './';
 import { GraphRAG } from './';
 
 describe('GraphRAG', () => {
+  it('stores a self-link once while retaining reverse links between different nodes', () => {
+    const graph = new GraphRAG(2);
+    graph.addNode({ id: 'a', content: 'A', embedding: [1, 0] });
+    graph.addNode({ id: 'b', content: 'B', embedding: [0, 1] });
+    const self: GraphEdge = { source: 'a', target: 'a', weight: 0.5, type: 'semantic' };
+    graph.addEdge(self);
+    graph.addEdge({ source: 'a', target: 'b', weight: 0.8, type: 'semantic' });
+    expect(graph.getEdges()).toEqual([
+      self,
+      { source: 'a', target: 'b', weight: 0.8, type: 'semantic' },
+      { source: 'b', target: 'a', weight: 0.8, type: 'semantic' },
+    ]);
+    expect(GraphRAG.deserialize(graph.serialize()).getEdges()).toEqual(graph.getEdges());
+  });
+
   beforeEach(() => {
     vi.clearAllMocks(); // Clear any mock state before each test
   });
