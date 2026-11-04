@@ -4,6 +4,32 @@ import type { GraphChunk, GraphEdge, GraphEmbedding, GraphNode } from './';
 import { GraphRAG } from './';
 
 describe('GraphRAG', () => {
+  it('replaces old nodes and edges when rebuilding and preserves state after an invalid rebuild', () => {
+    const graph = new GraphRAG(2);
+    graph.createGraph(
+      [
+        { text: 'old A', metadata: {} },
+        { text: 'old B', metadata: {} },
+      ],
+      [{ vector: [1, 0] }, { vector: [1, 0] }],
+    );
+    graph.createGraph([{ text: 'new', metadata: {} }], [{ vector: [0, 1] }]);
+    expect(graph.getNodes().map(node => node.content)).toEqual(['new']);
+    expect(graph.getEdges()).toEqual([]);
+    expect(graph.query({ query: [0, 1] }).map(node => node.content)).toEqual(['new']);
+    const snapshot = graph.serialize();
+    expect(() =>
+      graph.createGraph(
+        [
+          { text: 'partial', metadata: {} },
+          { text: 'invalid', metadata: {} },
+        ],
+        [{ vector: [1, 0] }, { vector: [1] }],
+      ),
+    ).toThrow();
+    expect(graph.serialize()).toEqual(snapshot);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks(); // Clear any mock state before each test
   });
