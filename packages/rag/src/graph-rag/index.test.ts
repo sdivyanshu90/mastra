@@ -4,6 +4,22 @@ import type { GraphChunk, GraphEdge, GraphEmbedding, GraphNode } from './';
 import { GraphRAG } from './';
 
 describe('GraphRAG', () => {
+  describe.each(['topK', 'randomWalkSteps'] as const)('invalid %s', option => {
+    it.each([NaN, Infinity, -Infinity, 1.5, 0])('rejects %s before traversal', value => {
+      // Empty graph makes even Infinity safe to reproduce without entering a walk.
+      const graph = new GraphRAG(2);
+      expect(() => graph.query({ query: [1, 0], [option]: value })).toThrow();
+    });
+  });
+  it.each([NaN, Infinity, -Infinity, 0, 1])('rejects invalid restart probability %s', restartProb => {
+    expect(() => new GraphRAG(2).query({ query: [1, 0], restartProb })).toThrow();
+  });
+  it('accepts integer controls with an ordinary restart probability', () => {
+    const graph = new GraphRAG(2);
+    graph.addNode({ id: 'a', content: 'A', embedding: [1, 0] });
+    expect(graph.query({ query: [1, 0], topK: 1, randomWalkSteps: 1, restartProb: 0.5 }).map(n => n.id)).toEqual(['a']);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks(); // Clear any mock state before each test
   });
