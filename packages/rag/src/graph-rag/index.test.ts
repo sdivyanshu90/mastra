@@ -4,6 +4,23 @@ import type { GraphChunk, GraphEdge, GraphEmbedding, GraphNode } from './';
 import { GraphRAG } from './';
 
 describe('GraphRAG', () => {
+  describe.each(['addNode', 'createGraph', 'query', 'deserialize'] as const)('%s embedding validation', boundary => {
+    it.each([NaN, Infinity, -Infinity])('rejects component %s', value => {
+      const graph = new GraphRAG(2);
+      graph.addNode({ id: 'good', content: 'Good', embedding: [1, 0] });
+      const invalid = [value, 1];
+      const snapshot = graph.serialize();
+      snapshot.nodes[0]!.embedding = invalid;
+      const invoke = () => {
+        if (boundary === 'addNode') graph.addNode({ id: 'bad', content: 'Bad', embedding: invalid });
+        else if (boundary === 'createGraph') graph.createGraph([{ text: 'Bad', metadata: {} }], [{ vector: invalid }]);
+        else if (boundary === 'query') graph.query({ query: invalid });
+        else GraphRAG.deserialize(snapshot);
+      };
+      expect(invoke).toThrow(/finite/);
+      expect(graph.query({ query: [1, 0] })[0]!.score).toSatisfy(Number.isFinite);
+    });
+  });
   beforeEach(() => {
     vi.clearAllMocks(); // Clear any mock state before each test
   });

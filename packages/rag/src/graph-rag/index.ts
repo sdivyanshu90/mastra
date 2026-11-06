@@ -71,6 +71,9 @@ export class GraphRAG {
     if (node.embedding.length !== this.dimension) {
       throw new Error(`Embedding dimension must be ${this.dimension}`);
     }
+    if (!node.embedding.every(Number.isFinite)) {
+      throw new Error('Embedding components must be finite numbers');
+    }
     this.nodes.set(node.id, node);
   }
 
@@ -349,6 +352,9 @@ export class GraphRAG {
   }): RankedNode[] {
     if (!query || query.length !== this.dimension) {
       throw new Error(`Query embedding must have dimension ${this.dimension}`);
+    }
+    if (!query.every(Number.isFinite)) {
+      throw new Error('Query embedding components must be finite numbers');
     }
     if (topK < 1) {
       throw new Error('TopK must be greater than 0');
