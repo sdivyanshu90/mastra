@@ -15,6 +15,25 @@ const getScoreSpreads = (results1: any, results2: any) => {
 };
 
 describe('rerank', () => {
+  it.each([-1, NaN, Infinity, -Infinity, 1.5])('rejects invalid rerank topK %s', async topK => {
+    const results = [1, 2, 3].map(id => ({ id: String(id), score: id / 3 }));
+    await expect(
+      rerankWithScorer({ results, query: 'test', scorer: { getRelevanceScore: async () => 1 }, options: { topK } }),
+    ).rejects.toThrow(/topK/i);
+  });
+  it('accepts zero and positive rerank counts', async () => {
+    const results = [1, 2, 3].map(id => ({ id: String(id), score: id / 3 }));
+    for (const topK of [0, 1, 2]) {
+      const ranked = await rerankWithScorer({
+        results,
+        query: 'test',
+        scorer: { getRelevanceScore: async () => 1 },
+        options: { topK },
+      });
+      expect(ranked).toHaveLength(topK);
+    }
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });

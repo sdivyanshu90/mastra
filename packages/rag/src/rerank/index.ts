@@ -99,6 +99,9 @@ async function executeRerank({
   options: RerankerFunctionOptions;
 }) {
   const { queryEmbedding, topK = 3, observabilityContext } = options;
+  if (!Number.isInteger(topK) || topK < 0) {
+    throw new Error('topK must be a nonnegative integer');
+  }
   const rerankSpan = observabilityContext?.tracingContext?.currentSpan?.createChildSpan({
     type: SpanType.RAG_ACTION,
     name: `rag rerank`,
