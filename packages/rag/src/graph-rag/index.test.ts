@@ -4,6 +4,16 @@ import type { GraphChunk, GraphEdge, GraphEmbedding, GraphNode } from './';
 import { GraphRAG } from './';
 
 describe('GraphRAG', () => {
+  it('rejects duplicate snapshot IDs instead of replacing content during restore', () => {
+    const graph = new GraphRAG(2);
+    graph.addNode({ id: 'a', content: 'Original', embedding: [1, 0] });
+    const snapshot = graph.serialize();
+    expect(GraphRAG.deserialize(snapshot).serialize()).toEqual(snapshot);
+    snapshot.nodes.push({ id: 'a', content: 'Replacement', embedding: [0, 1] });
+    expect(() => GraphRAG.deserialize(snapshot)).toThrow(/duplicate.*a/i);
+    expect(graph.getNodes()[0]!.content).toBe('Original');
+  });
+
   beforeEach(() => {
     vi.clearAllMocks(); // Clear any mock state before each test
   });

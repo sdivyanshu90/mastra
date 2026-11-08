@@ -140,6 +140,9 @@ export class GraphRAG {
     const graph = new GraphRAG(snapshot.dimension, snapshot.threshold);
 
     for (const node of snapshot.nodes ?? []) {
+      if (graph.nodes.has(node.id)) {
+        throw new Error(`Duplicate snapshot node ID: ${node.id}`);
+      }
       // Route through addNode so embedding presence and dimension are validated
       // at load time rather than failing later inside query().
       graph.addNode({
