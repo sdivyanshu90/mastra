@@ -4,6 +4,21 @@ import type { GraphChunk, GraphEdge, GraphEmbedding, GraphNode } from './';
 import { GraphRAG } from './';
 
 describe('GraphRAG', () => {
+  describe.each(['addEdge', 'deserialize'] as const)('%s edge weights', boundary => {
+    it.each([NaN, Infinity, -Infinity])('rejects nonfinite weight %s', weight => {
+      const graph = new GraphRAG(2);
+      graph.addNode({ id: 'a', content: 'A', embedding: [1, 0] });
+      graph.addNode({ id: 'b', content: 'B', embedding: [0, 1] });
+      const edge: GraphEdge = { source: 'a', target: 'b', type: 'semantic', weight };
+      const snapshot = graph.serialize();
+      snapshot.edges.push(edge);
+      expect(() => (boundary === 'addEdge' ? graph.addEdge(edge) : GraphRAG.deserialize(snapshot))).toThrow(/finite/i);
+      expect(graph.getEdges()).toEqual([]);
+      graph.addEdge({ ...edge, weight: 0.5 });
+      expect(GraphRAG.deserialize(graph.serialize()).getEdges()).toEqual(graph.getEdges());
+    });
+  });
+
   beforeEach(() => {
     vi.clearAllMocks(); // Clear any mock state before each test
   });
