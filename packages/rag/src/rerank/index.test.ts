@@ -15,6 +15,33 @@ const getScoreSpreads = (results1: any, results2: any) => {
 };
 
 describe('rerank', () => {
+  it.each([
+    { semantic: -1, vector: 2, position: 0 },
+    { semantic: 2, vector: -1, position: 0 },
+    { semantic: 0, vector: 2, position: -1 },
+  ])('rejects out-of-range weights even when their sum is one: %j', async weights => {
+    await expect(
+      rerankWithScorer({
+        results: [{ id: 'a', score: 1 }],
+        query: 'test',
+        scorer: { getRelevanceScore: async () => 1 },
+        options: { weights },
+      }),
+    ).rejects.toThrow(/weights/i);
+  });
+  it('accepts boundary weights for vector-only reranking', async () => {
+    const ranked = await rerankWithScorer({
+      results: [
+        { id: 'a', score: 0.25 },
+        { id: 'b', score: 0.75 },
+      ],
+      query: 'test',
+      scorer: { getRelevanceScore: async () => 1 },
+      options: { weights: { semantic: 0, vector: 1, position: 0 } },
+    });
+    expect(ranked.map(item => item.result.id)).toEqual(['b', 'a']);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
