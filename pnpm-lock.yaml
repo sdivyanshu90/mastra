@@ -6317,6 +6317,9 @@ importers:
         specifier: 0.1.0-alpha.7
         version: 0.1.0-alpha.7(encoding@0.1.14)
     devDependencies:
+      '@mastra/libsql':
+        specifier: workspace:*
+        version: link:../../stores/libsql
       '@ai-sdk/cohere':
         specifier: ^1.2.10
         version: 1.2.10(zod@4.6.7)

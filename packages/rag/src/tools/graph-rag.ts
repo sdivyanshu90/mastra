@@ -28,10 +28,6 @@ export const createGraphRAGTool = (options: GraphRagToolOptions) => {
     ...defaultGraphOptions,
     ...(options.graphOptions || {}),
   };
-  // Initialize GraphRAG
-  const graphRag = new GraphRAG(graphOptions.dimension, graphOptions.threshold);
-  let isInitialized = false;
-
   const inputSchema = options.enableFilter ? filterSchema : z.object(baseSchema).passthrough();
 
   return createTool({
@@ -98,8 +94,9 @@ export const createGraphRAGTool = (options: GraphRagToolOptions) => {
           logger.debug('vectorQuerySearch returned results', { count: results.length });
         }
 
-        // Initialize graph if not done yet
-        if (!isInitialized) {
+        const graphRag = new GraphRAG(graphOptions.dimension, graphOptions.threshold);
+        if (results.length === 0) return { relevantContext: [], sources: [] };
+        {
           // Get all chunks and embeddings for graph construction
           const chunks = results.map(result => ({
             text: result?.metadata?.text,
@@ -129,9 +126,6 @@ export const createGraphRAGTool = (options: GraphRagToolOptions) => {
             throw err;
           }
           buildSpan?.end();
-          isInitialized = true;
-        } else if (logger) {
-          logger.debug('Graph already initialized, skipping graph construction');
         }
 
         // Get reranked results using GraphRAG
