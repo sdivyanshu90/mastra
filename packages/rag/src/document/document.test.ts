@@ -2046,6 +2046,23 @@ describe('MDocument', () => {
   });
 
   describe('chunkJson', () => {
+    it('preserves long strings at the minimum supported JSON maxSize', async () => {
+      const text = 'a'.repeat(100);
+      const doc = MDocument.fromJSON(JSON.stringify({ x: text }));
+      await doc.chunk({ strategy: 'json', maxSize: 21, minSize: 1 });
+      expect(
+        doc
+          .getText()
+          .map(chunk => JSON.parse(chunk).x)
+          .join(''),
+      ).toBe(text);
+      expect(doc.getText().every(chunk => chunk.length <= 21)).toBe(true);
+    });
+
+    it.each([1, 19, 20, 20.5])('rejects JSON maxSize %s before processing input', async maxSize => {
+      await expect(MDocument.fromJSON('{}').chunk({ strategy: 'json', maxSize })).rejects.toThrow();
+    });
+
     describe('Unicode handling', () => {
       it('should handle Unicode characters correctly', async () => {
         const input = {
