@@ -140,12 +140,8 @@ export class RecursiveJsonTransformer {
         chunks: [...chunks, currentChunk],
       };
     } else if (typeof value === 'string') {
-      const stringChunks = this.splitLongString(value);
-      const newChunks = stringChunks
-        .map(chunk => {
-          return this.createChunk(chunk, fullPath);
-        })
-        .filter(chunk => RecursiveJsonTransformer.jsonSize(chunk) <= this.maxSize);
+      const stringChunks = this.splitLongString(value, fullPath);
+      const newChunks = stringChunks.map(chunk => this.createChunk(chunk, fullPath));
 
       return {
         currentChunk,
@@ -315,26 +311,36 @@ export class RecursiveJsonTransformer {
    * Splits long strings into smaller chunks at word boundaries
    * Ensures each chunk is within maxSize limit
    */
-  private splitLongString(value: string): string[] {
-    const chunks: string[] = [];
-    let remaining = value;
-
-    while (remaining.length > 0) {
-      const overhead = 20;
-      const chunkSize = Math.floor(this.maxSize - overhead);
-
-      if (remaining.length <= chunkSize) {
-        chunks.push(remaining);
-        break;
-      }
-
-      const lastSpace = remaining.slice(0, chunkSize).lastIndexOf(' ');
-      const splitAt = lastSpace > 0 ? lastSpace + 1 : chunkSize;
-
-      chunks.push(remaining.slice(0, splitAt));
-      remaining = remaining.slice(splitAt);
+  private splitLongString(value: string, path: string[]): string[] {
+    if (RecursiveJsonTransformer.jsonSize(this.createChunk('', path)) > this.maxSize) {
+      throw new Error('JSON maxSize is too small to preserve this field and a string character');
     }
-
+    const chunks: string[] = [];
+    const characters = Array.from(value);
+    let start = 0;
+    while (start < characters.length) {
+      let low = 1;
+      let high = Math.min(characters.length - start, Math.floor(this.maxSize));
+      let fitting = 0;
+      while (low <= high) {
+        const length = Math.floor((low + high) / 2);
+        const candidate = characters.slice(start, start + length).join('');
+        if (RecursiveJsonTransformer.jsonSize(this.createChunk(candidate, path)) <= this.maxSize) {
+          fitting = length;
+          low = length + 1;
+        } else {
+          high = length - 1;
+        }
+      }
+      if (fitting === 0) {
+        throw new Error('JSON maxSize is too small to preserve this field and a string character');
+      }
+      const candidate = characters.slice(start, start + fitting).join('');
+      const space = candidate.lastIndexOf(' ');
+      const piece = start + fitting < characters.length && space > 0 ? candidate.slice(0, space + 1) : candidate;
+      chunks.push(piece);
+      start += Array.from(piece).length;
+    }
     return chunks;
   }
 

@@ -2047,6 +2047,28 @@ describe('MDocument', () => {
   });
 
   describe('chunkJson', () => {
+    it('reports fields whose keys leave no room for a string character', async () => {
+      const doc = MDocument.fromJSON(JSON.stringify({ ['k'.repeat(100)]: 'content' }));
+      await expect(doc.chunk({ strategy: 'json', maxSize: 90 })).rejects.toThrow(/too small/);
+    });
+
+    it.each(['ordinary', '"\\\n'.repeat(40)])(
+      'preserves JSON string content with a long key and value %s',
+      async text => {
+        const key = 'a_long_document_field_name_that_exceeds_the_fixed_overhead';
+        const value = text.repeat(10);
+        const doc = MDocument.fromJSON(JSON.stringify({ [key]: value }));
+        await doc.chunk({ strategy: 'json', maxSize: 90, minSize: 1, ensureAscii: false });
+        expect(
+          doc
+            .getText()
+            .map(chunk => JSON.parse(chunk)[key])
+            .join(''),
+        ).toBe(value);
+        expect(doc.getText().every(chunk => chunk.length <= 90)).toBe(true);
+      },
+    );
+
     it.each([0.5, 20, 20.9])('rejects maxSize %s instead of hanging on long JSON strings (#30166)', async maxSize => {
       const doc = MDocument.fromJSON(JSON.stringify({ text: 'x'.repeat(100) }));
 
