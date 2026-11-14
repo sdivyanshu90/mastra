@@ -35,7 +35,9 @@ export class BaseResource {
       fetch: customFetch,
     } = this.options;
     const { retries: requestRetries, ...fetchOptions } = options;
-    const retries = requestRetries ?? defaultRetries;
+    const method = (fetchOptions.method ?? 'GET').toUpperCase();
+    const defaultMethodRetries = ['GET', 'HEAD', 'OPTIONS'].includes(method) ? defaultRetries : 0;
+    const retries = requestRetries ?? this.options.retries ?? defaultMethodRetries;
     if (!Number.isSafeInteger(retries) || retries < 0) {
       throw new RangeError('retries must be a non-negative safe integer');
     }

@@ -113,7 +113,7 @@ export interface ClientOptions {
   baseUrl: string;
   /** API route prefix. Defaults to '/api'. Set this to match your server's apiPrefix configuration. */
   apiPrefix?: string;
-  /** Number of retry attempts for failed requests */
+  /** Explicit retry count for all methods. By default, only GET, HEAD, and OPTIONS are retried. */
   retries?: number;
   /** Initial backoff time in milliseconds between retries */
   backoffMs?: number;

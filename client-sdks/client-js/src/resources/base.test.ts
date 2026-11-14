@@ -41,6 +41,28 @@ describe('BaseResource', () => {
     });
   });
 
+  it.each(['POST', 'PATCH', 'DELETE'])('does not implicitly repeat a %s after a server-side failure', async method => {
+    server.on('request', (req, res) => {
+      requestCount++;
+      req.resume();
+      res.writeHead(500);
+      res.end('{}');
+    });
+    const client = new BaseResource({ baseUrl: serverUrl, backoffMs: 0 });
+    await expect(client.request('/side-effect', { method, body: { action: 'apply' } })).rejects.toThrow();
+    expect(requestCount).toBe(1);
+  });
+  it('preserves explicit retry opt-in for writes', async () => {
+    server.on('request', (req, res) => {
+      requestCount++;
+      req.resume();
+      res.writeHead(500);
+      res.end('{}');
+    });
+    await expect(resource.request('/side-effect', { method: 'POST' })).rejects.toThrow();
+    expect(requestCount).toBe(3);
+  });
+
   const runRetryTest = async (config: RetryTestConfig & { expectedRequestCount: number }) => {
     // Arrange: Configure server response
     server.on('request', (_req, res) => {
