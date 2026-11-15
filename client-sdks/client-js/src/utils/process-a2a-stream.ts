@@ -30,9 +30,13 @@ function parseEventBlock<T>(eventBlock: string): ParsedA2AEvent<T> {
   const lines = trimmedBlock.split(/\r?\n/);
   const dataLines = lines.filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart());
 
+  if (dataLines.length === 0 && lines.every(line => /^(?:\s*$|:|event:|id:|retry:)/.test(line))) {
+    return {};
+  }
   const payload = dataLines.length > 0 ? dataLines.join('\n') : trimmedBlock;
 
-  if (!payload || payload === '[DONE]') {
+  if (!payload) return {};
+  if (payload === '[DONE]') {
     return { done: true };
   }
 
@@ -77,7 +81,7 @@ export async function* processA2AStream<T = A2AStreamEventData>(
         const { eventBlock, rest } = splitNextEvent(buffer);
         buffer = rest;
 
-        if (!eventBlock) {
+        if (eventBlock === undefined) {
           break;
         }
 
