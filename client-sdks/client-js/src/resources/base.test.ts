@@ -41,6 +41,27 @@ describe('BaseResource', () => {
     });
   });
 
+  it.each([200, 204, 205])('resolves an empty successful %s response without retrying', async status => {
+    server.on('request', (req, res) => {
+      requestCount++;
+      req.resume();
+      res.writeHead(status);
+      res.end();
+    });
+    await expect(resource.request('/delete', { method: 'DELETE' })).resolves.toBeUndefined();
+    expect(requestCount).toBe(1);
+  });
+  it('reports malformed successful JSON without repeating the request', async () => {
+    server.on('request', (req, res) => {
+      requestCount++;
+      req.resume();
+      res.writeHead(200);
+      res.end('<html>broken</html>');
+    });
+    await expect(resource.request('/write', { method: 'POST' })).rejects.toThrow();
+    expect(requestCount).toBe(1);
+  });
+
   const runRetryTest = async (config: RetryTestConfig & { expectedRequestCount: number }) => {
     // Arrange: Configure server response
     server.on('request', (_req, res) => {

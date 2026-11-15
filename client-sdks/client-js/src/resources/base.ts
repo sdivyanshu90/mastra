@@ -50,6 +50,7 @@ export class BaseResource {
       if (signal?.aborted) {
         throw signal.reason ?? new DOMException('This operation was aborted', 'AbortError');
       }
+      let responseAccepted = false;
       try {
         const response = await fetchFn(`${baseUrl.replace(/\/$/, '')}${fullPath}`, {
           ...fetchOptions,
@@ -92,14 +93,18 @@ export class BaseResource {
           throw new MastraClientError(response.status, response.statusText, errorMessage, parsedBody);
         }
 
+        responseAccepted = true;
         if (options.stream) {
           return response as unknown as T;
         }
 
-        const data = await response.json();
-        return data as T;
+        if (response.status === 204 || response.status === 205) return undefined as T;
+        const body = await response.text();
+        return (body === '' ? undefined : JSON.parse(body)) as T;
       } catch (error) {
         lastError = error as Error;
+        // A successful response means the operation must not be repeated due to body parsing.
+        if (responseAccepted) throw error;
 
         // Aborted requests must not be retried
         if (signal?.aborted || (error as Error)?.name === 'AbortError') {
