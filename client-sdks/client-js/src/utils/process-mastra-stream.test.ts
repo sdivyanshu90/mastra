@@ -2,7 +2,7 @@ import { ReadableStream } from 'node:stream/web';
 import type { ChunkType } from '@mastra/core/stream';
 import { ChunkFrom } from '@mastra/core/stream';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { processMastraStream } from './process-mastra-stream';
+import { processMastraNetworkStream, processMastraStream } from './process-mastra-stream';
 
 describe('processMastraStream', () => {
   let mockOnChunk: ReturnType<typeof vi.fn>;
@@ -312,6 +312,34 @@ describe('processMastraStream', () => {
     expect(mockOnChunk).toHaveBeenCalledTimes(1);
     expect(mockOnChunk).toHaveBeenCalledWith(testChunk);
   });
+
+  it.each([processMastraStream, processMastraNetworkStream])(
+    'cancels an open stream when the application stops consuming it (%p)',
+    async processStream => {
+      const callbackError = new Error('Application callback failed');
+      let canceled = false;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: {"type":"text-delta"}\n\n'));
+        },
+        cancel() {
+          canceled = true;
+          throw new Error('Transport cleanup failed');
+        },
+      });
+
+      await expect(
+        processStream({
+          stream,
+          onChunk: async () => {
+            throw callbackError;
+          },
+        }),
+      ).rejects.toBe(callbackError);
+      expect(canceled).toBe(true);
+      expect(stream.locked).toBe(false);
+    },
+  );
 
   it('should handle stream read errors', async () => {
     const errorMessage = 'Stream read error';

@@ -46,6 +46,10 @@ async function sharedProcessMastraStream({
         }
       }
     }
+  } catch (error) {
+    // Cancel the underlying source without replacing or delaying the original error.
+    void reader.cancel(error).catch(() => {});
+    throw error;
   } finally {
     signal?.removeEventListener('abort', abort);
     reader.releaseLock();
