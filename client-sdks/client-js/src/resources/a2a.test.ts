@@ -470,6 +470,17 @@ describe('A2A', () => {
       expectTypeOf<ReturnType<A2A['cancelTask']>>().toEqualTypeOf<Promise<Task>>();
     });
 
+    it('rejects cancellation errors returned with HTTP 200', async () => {
+      server.on('request', (req, res) => {
+        req.resume();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: 'req-1', error: { code: -32001, message: 'Task not found' } }));
+      });
+
+      const a2a = new A2A({ baseUrl: serverUrl }, 'test-agent');
+      await expect(a2a.cancelTask({ id: 'missing-task' })).rejects.toBeInstanceOf(MastraA2AError);
+    });
+
     it('cancelTask sends the tasks/cancel JSON-RPC method', async () => {
       let receivedBody: Record<string, unknown> | undefined;
       const mockEnvelope = { jsonrpc: '2.0', id: 'req-1', result: { kind: 'task', id: 'task-1' } };
