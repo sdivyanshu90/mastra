@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MastraClient } from '../client';
 import type { ResponsesStreamEvent } from '../types';
+import { ResponsesStream } from './responses';
 
 global.fetch = vi.fn();
 
@@ -325,6 +326,24 @@ describe('Responses Resource', () => {
         }),
       }),
     );
+  });
+
+  it.each(['\n', '\r\n'])('delivers separate events with %j line endings', async newline => {
+    const events = [
+      { type: 'response.output_text.delta', delta: 'first' },
+      { type: 'response.output_text.delta', delta: 'second' },
+    ];
+    const wire = events.map(event => `data: ${JSON.stringify(event)}${newline}${newline}`).join('');
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const char of wire) controller.enqueue(encoder.encode(char));
+        controller.close();
+      },
+    });
+    const received = [];
+    for await (const event of new ResponsesStream(new Response(stream))) received.push(event);
+    expect(received).toEqual(events);
   });
 
   it('streams response events as an async iterable', async () => {

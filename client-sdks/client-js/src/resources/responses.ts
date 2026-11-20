@@ -117,17 +117,16 @@ export class ResponsesStream implements AsyncIterable<ResponsesStreamEvent> {
         const { done, value } = await reader.read();
         buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
 
-        let boundaryIndex = buffer.indexOf('\n\n');
-        while (boundaryIndex !== -1) {
-          const block = buffer.slice(0, boundaryIndex);
-          buffer = buffer.slice(boundaryIndex + 2);
+        const eventBoundary = /\r?\n\r?\n/;
+        let boundary: RegExpExecArray | null;
+        while ((boundary = eventBoundary.exec(buffer))) {
+          const block = buffer.slice(0, boundary.index);
+          buffer = buffer.slice(boundary.index + boundary[0].length);
 
           const parsed = parseSseBlock(block);
           if (parsed) {
             yield parsed;
           }
-
-          boundaryIndex = buffer.indexOf('\n\n');
         }
 
         if (done) {
