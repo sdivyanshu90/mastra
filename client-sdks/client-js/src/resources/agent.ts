@@ -975,7 +975,7 @@ export class Agent extends BaseResource {
             });
           } catch (error) {
             agent.deleteLatestSignalRuntimeOptions({ resourceId, threadId });
-            console.error('Error running client-tool continuation:', error);
+            throw error;
           } finally {
             agent.deleteSignalRuntimeOptions(runId);
           }
