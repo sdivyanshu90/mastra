@@ -2,6 +2,14 @@ import { MessageList } from '@mastra/core/agent/message-list';
 import type { MessageListInput } from '@mastra/core/agent/message-list';
 import type { V5UIMessage, V6UIMessage, V7UIMessage } from './public-types';
 
+const SYSTEM_REMINDER_WRAPPER = /^<system-reminder(?:\s[^<>]*)?>[\s\S]*?<\/system-reminder>/;
+
+function isStandaloneSystemReminder(text: unknown): boolean {
+  if (typeof text !== 'string') return false;
+  const trimmed = text.trim();
+  return SYSTEM_REMINDER_WRAPPER.exec(trimmed)?.[0] === trimmed;
+}
+
 function isSystemReminderUIMessage(message: {
   role?: string;
   parts?: Array<{ type?: string; text?: string }>;
@@ -17,14 +25,13 @@ function isSystemReminderUIMessage(message: {
     return false;
   }
 
-  // Fall back to text inspection for backward compatibility
+  // Older stored reminders may only have a wrapper, without metadata.
   if (Array.isArray(message.parts)) {
-    return message.parts.some(
-      part => part.type === 'text' && typeof part.text === 'string' && part.text.includes('<system-reminder'),
-    );
+    const [part] = message.parts;
+    return message.parts.length === 1 && part?.type === 'text' && isStandaloneSystemReminder(part.text);
   }
 
-  return typeof message.content === 'string' && message.content.includes('<system-reminder');
+  return isStandaloneSystemReminder(message.content);
 }
 
 function filterSystemReminderUIMessages<

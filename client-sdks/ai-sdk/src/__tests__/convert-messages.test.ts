@@ -24,6 +24,30 @@ describe('toAISdkFormat', () => {
     },
   ];
 
+  it.each([
+    ['v4', toAISdkV4Messages],
+    ['v5 (default)', toAISdkMessages],
+    ['v5 (explicit converter)', toAISdkV5Messages],
+    ['v6', (messages: MastraDBMessage[]) => toAISdkMessages(messages, { version: 'v6' })],
+    ['v7', (messages: MastraDBMessage[]) => toAISdkMessages(messages, { version: 'v7' })],
+  ] as const)('preserves user text that mentions reminders in %s', (_version, convert) => {
+    const reminder = '<system-reminder type="temporal-gap">Time passed.</system-reminder>';
+    const messages: MastraDBMessage[] = [
+      { id: 'prefix', text: ['What does <system-reminder mean?'] },
+      { id: 'quoted', text: [`How do I render ${reminder}?`] },
+      { id: 'comparison', text: [`${reminder} How does that compare with ${reminder}`] },
+      { id: 'multipart', text: [reminder, 'Can you explain this example?'] },
+      { id: 'legacy', text: [reminder] },
+    ].map(({ id, text }) => ({
+      id,
+      role: 'user',
+      content: { format: 2, parts: text.map(text => ({ type: 'text', text })) },
+      createdAt: new Date(),
+    }));
+
+    expect(convert(messages).map(message => message.id)).toEqual(['prefix', 'quoted', 'comparison', 'multipart']);
+  });
+
   describe('toAISdkV5Messages', () => {
     it('should convert Mastra V2 messages to AI SDK V5 UI format', () => {
       const result = toAISdkV5Messages(sampleMessages);
