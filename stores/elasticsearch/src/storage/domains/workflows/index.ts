@@ -29,6 +29,14 @@ type WorkflowSnapshotRecord = {
   updatedAt: string | Date;
 };
 
+function snapshotKey(namespace: string, workflowName: string, runId: string): string {
+  return getKey(TABLE_WORKFLOW_SNAPSHOT, { namespace, workflow_name: workflowName, run_id: runId });
+}
+
+function legacySnapshotPrefix(key: string): string {
+  return `${key}:resourceId:`;
+}
+
 function parseWorkflowRun(row: Record<string, unknown>): WorkflowRun {
   let parsedSnapshot: WorkflowRunState | string = row.snapshot as string;
   if (typeof parsedSnapshot === 'string') {
@@ -57,6 +65,18 @@ export class WorkflowsElasticSearch extends WorkflowsStorage {
     this.db = new ElasticSearchDB({ client: config.client });
   }
 
+  private async getSnapshotRecord(namespace: string, workflowName: string, runId: string) {
+    const keys = { namespace, workflow_name: workflowName, run_id: runId };
+    const current = await this.db.get<WorkflowSnapshotRecord>({ tableName: TABLE_WORKFLOW_SNAPSHOT, keys });
+    if (current) return current;
+
+    const legacy = await this.db.listAll<WorkflowSnapshotRecord>({
+      tableName: TABLE_WORKFLOW_SNAPSHOT,
+      keyPrefix: legacySnapshotPrefix(snapshotKey(namespace, workflowName, runId)),
+    });
+    return legacy.find(record => record.workflow_name === workflowName && record.run_id === runId) ?? null;
+  }
+
   public supportsConcurrentUpdates(): boolean {
     return false;
   }
@@ -81,14 +101,7 @@ export class WorkflowsElasticSearch extends WorkflowsStorage {
     state?: Record<string, unknown>;
   }): Promise<Record<string, StepResult<unknown, unknown, unknown, unknown>>> {
     try {
-      const existingRecord = await this.db.get<WorkflowSnapshotRecord>({
-        tableName: TABLE_WORKFLOW_SNAPSHOT,
-        keys: {
-          namespace: 'workflows',
-          workflow_name: workflowName,
-          run_id: runId,
-        },
-      });
+      const existingRecord = await this.getSnapshotRecord('workflows', workflowName, runId);
 
       const existingSnapshot = existingRecord?.snapshot;
       let snapshot = existingSnapshot;
@@ -121,6 +134,7 @@ export class WorkflowsElasticSearch extends WorkflowsStorage {
         workflowName,
         runId,
         snapshot,
+        resourceId: existingRecord?.resourceId,
         createdAt: existingRecord?.createdAt ? ensureDate(existingRecord.createdAt) : undefined,
       });
 
@@ -151,14 +165,7 @@ export class WorkflowsElasticSearch extends WorkflowsStorage {
     opts: UpdateWorkflowStateOptions;
   }): Promise<WorkflowRunState | undefined> {
     try {
-      const existingRecord = await this.db.get<WorkflowSnapshotRecord>({
-        tableName: TABLE_WORKFLOW_SNAPSHOT,
-        keys: {
-          namespace: 'workflows',
-          workflow_name: workflowName,
-          run_id: runId,
-        },
-      });
+      const existingRecord = await this.getSnapshotRecord('workflows', workflowName, runId);
 
       const existingSnapshot = existingRecord?.snapshot;
 
@@ -180,6 +187,7 @@ export class WorkflowsElasticSearch extends WorkflowsStorage {
         workflowName,
         runId,
         snapshot: updatedSnapshot,
+        resourceId: existingRecord?.resourceId,
         createdAt: existingRecord?.createdAt ? ensureDate(existingRecord.createdAt) : undefined,
       });
 
@@ -212,16 +220,19 @@ export class WorkflowsElasticSearch extends WorkflowsStorage {
     const { namespace = 'workflows', workflowName, runId, resourceId, snapshot, createdAt, updatedAt } = params;
     try {
       let finalCreatedAt = createdAt;
-      if (!finalCreatedAt) {
-        const existing = await this.db.get<WorkflowSnapshotRecord>({
-          tableName: TABLE_WORKFLOW_SNAPSHOT,
-          keys: {
-            namespace,
-            workflow_name: workflowName,
-            run_id: runId,
-          },
-        });
-        finalCreatedAt = existing?.createdAt ? ensureDate(existing.createdAt) : new Date();
+      let finalResourceId = resourceId;
+      if (!finalCreatedAt || finalResourceId === undefined) {
+        const keys = { namespace, workflow_name: workflowName, run_id: runId };
+        const existing =
+          (await this.db.get<WorkflowSnapshotRecord>({ tableName: TABLE_WORKFLOW_SNAPSHOT, keys })) ??
+          (resourceId
+            ? await this.db.get<WorkflowSnapshotRecord>({
+                tableName: TABLE_WORKFLOW_SNAPSHOT,
+                keys: { ...keys, resourceId },
+              })
+            : null);
+        finalCreatedAt ??= existing?.createdAt ? ensureDate(existing.createdAt) : new Date();
+        finalResourceId ??= existing?.resourceId;
       }
 
       await this.db.insert({
@@ -230,7 +241,7 @@ export class WorkflowsElasticSearch extends WorkflowsStorage {
           namespace,
           workflow_name: workflowName,
           run_id: runId,
-          resourceId,
+          resourceId: finalResourceId,
           snapshot,
           createdAt: finalCreatedAt,
           updatedAt: updatedAt ?? new Date(),
@@ -260,14 +271,7 @@ export class WorkflowsElasticSearch extends WorkflowsStorage {
   }): Promise<WorkflowRunState | null> {
     const { namespace = 'workflows', workflowName, runId } = params;
     try {
-      const record = await this.db.get<WorkflowSnapshotRecord>({
-        tableName: TABLE_WORKFLOW_SNAPSHOT,
-        keys: {
-          namespace,
-          workflow_name: workflowName,
-          run_id: runId,
-        },
-      });
+      const record = await this.getSnapshotRecord(namespace, workflowName, runId);
       return record?.snapshot ?? null;
     } catch (error) {
       throw new MastraError(
@@ -294,24 +298,14 @@ export class WorkflowsElasticSearch extends WorkflowsStorage {
     workflowName?: string;
   }): Promise<WorkflowRun | null> {
     try {
-      const records = await this.db.listAll<WorkflowSnapshotRecord>({
-        tableName: TABLE_WORKFLOW_SNAPSHOT,
-        keyPrefix: getKey(TABLE_WORKFLOW_SNAPSHOT, { namespace: 'workflows' }),
-      });
-
-      const data = records.find(workflow => {
-        if (!workflow) {
-          return false;
-        }
-
-        const runIdMatch = workflow.run_id === runId;
-
-        if (workflowName) {
-          return runIdMatch && workflow.workflow_name === workflowName;
-        }
-
-        return runIdMatch;
-      });
+      const data = workflowName
+        ? await this.getSnapshotRecord('workflows', workflowName, runId)
+        : (
+            await this.db.listAll<WorkflowSnapshotRecord>({
+              tableName: TABLE_WORKFLOW_SNAPSHOT,
+              keyPrefix: getKey(TABLE_WORKFLOW_SNAPSHOT, { namespace: 'workflows' }),
+            })
+          ).find(record => record?.run_id === runId);
 
       if (!data) {
         return null;
@@ -336,8 +330,9 @@ export class WorkflowsElasticSearch extends WorkflowsStorage {
   }
 
   public async deleteWorkflowRunById({ runId, workflowName }: { runId: string; workflowName: string }): Promise<void> {
-    const key = getKey(TABLE_WORKFLOW_SNAPSHOT, { namespace: 'workflows', workflow_name: workflowName, run_id: runId });
+    const key = snapshotKey('workflows', workflowName, runId);
     try {
+      await this.db.deleteData({ tableName: TABLE_WORKFLOW_SNAPSHOT, keyPrefix: legacySnapshotPrefix(key) });
       await this.db.delete({ tableName: TABLE_WORKFLOW_SNAPSHOT, key });
     } catch (error) {
       throw new MastraError(
@@ -385,16 +380,19 @@ export class WorkflowsElasticSearch extends WorkflowsStorage {
       if (workflowName) {
         keyPrefix = getKey(TABLE_WORKFLOW_SNAPSHOT, { namespace: 'workflows', workflow_name: workflowName }) + ':';
       }
-      const records = await this.db.listAll<Record<string, unknown>>({
+      const entries = await this.db.listAllEntries<WorkflowSnapshotRecord>({
         tableName: TABLE_WORKFLOW_SNAPSHOT,
         keyPrefix,
       });
 
-      let runs = records
-        .filter(
-          (record): record is Record<string, unknown> =>
-            record !== null && record !== undefined && typeof record === 'object' && 'workflow_name' in record,
-        )
+      const recordsByRun = new Map<string, WorkflowSnapshotRecord>();
+      for (const { key, value } of entries) {
+        if (!value || typeof value !== 'object' || !('workflow_name' in value)) continue;
+        const canonicalKey = snapshotKey('workflows', value.workflow_name, value.run_id);
+        if (!recordsByRun.has(canonicalKey) || key === canonicalKey) recordsByRun.set(canonicalKey, value);
+      }
+
+      let runs = [...recordsByRun.values()]
         .filter(record => !workflowName || record.workflow_name === workflowName)
         .filter(record => !resourceId || record.resourceId === resourceId)
         .map(w => parseWorkflowRun(w))

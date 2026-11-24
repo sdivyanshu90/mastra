@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Client as ElasticSearchClient } from '@elastic/elasticsearch';
 import {
   createTestSuite,
@@ -5,10 +6,14 @@ import {
   createClientAcceptanceTests,
   createDomainDirectTests,
 } from '@internal/storage-test-utils';
+import { TABLE_WORKFLOW_SNAPSHOT } from '@mastra/core/storage';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { createSampleWorkflowSnapshot } from '../../../_test-utils/src/domains/workflows/data';
+import { ElasticSearchDB } from './db';
 import { MemoryElasticSearch } from './domains/memory';
 import { ScoresElasticSearch } from './domains/scores';
+import { getKey } from './domains/utils';
 import { WorkflowsElasticSearch } from './domains/workflows';
 import { ElasticSearchStore } from './store';
 import type { ElasticSearchConfig } from './types';
@@ -139,4 +144,42 @@ describe('ElasticSearch domain with client config', () => {
     await memoryDomain.deleteThread({ threadId: thread.id });
     await client.close();
   });
+});
+
+describe('Elasticsearch resource-scoped workflow snapshots', () => {
+  it.each(['current', 'legacy'])(
+    'loads the snapshot of a suspended resource-scoped run from the %s layout',
+    async layout => {
+      const store = new ElasticSearchStore({ id: 'resource-snapshot-test', client: sharedClient });
+      const workflows = (await store.getStore('workflows'))!;
+      const workflowName = randomUUID();
+      const resourceId = 'customer-1';
+      const { runId, snapshot } = createSampleWorkflowSnapshot('suspended');
+
+      try {
+        const createdAt = new Date('2025-03-04T00:00:00Z');
+        if (layout === 'legacy') {
+          const fields = { namespace: 'workflows', workflow_name: workflowName, run_id: runId, resourceId };
+          await new ElasticSearchDB({ client: sharedClient }).bulkSet({
+            tableName: TABLE_WORKFLOW_SNAPSHOT,
+            entries: [
+              {
+                key: getKey(TABLE_WORKFLOW_SNAPSHOT, fields),
+                value: { ...fields, snapshot, createdAt: createdAt.toISOString(), updatedAt: createdAt.toISOString() },
+              },
+            ],
+          });
+        } else {
+          await workflows.persistWorkflowSnapshot({ workflowName, runId, resourceId, snapshot, createdAt });
+        }
+        expect(await workflows.loadWorkflowSnapshot({ workflowName, runId })).toMatchObject({ status: 'suspended' });
+        await workflows.updateWorkflowState({ workflowName, runId, opts: { status: 'running' } });
+        const { runs } = await workflows.listWorkflowRuns({ workflowName, resourceId });
+        expect(runs).toMatchObject([{ runId, resourceId, createdAt, snapshot: { status: 'running' } }]);
+      } finally {
+        await workflows.deleteWorkflowRunById({ workflowName, runId });
+      }
+      expect(await workflows.getWorkflowRunById({ workflowName, runId })).toBeNull();
+    },
+  );
 });
