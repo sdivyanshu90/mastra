@@ -186,48 +186,54 @@ export class WorkflowsUpstash extends WorkflowsStorage {
     }
   }
 
+  private snapshotKey(namespace: string, workflowName: string, runId: string): string {
+    return getKey(TABLE_WORKFLOW_SNAPSHOT, { namespace, workflow_name: workflowName, run_id: runId });
+  }
+
+  private legacySnapshotKeys(key: string): Promise<string[]> {
+    return this.#db.scanKeys(`${key.replace(/[*?[\]\\]/g, '\\$&')}:resourceId:*`);
+  }
+
+  private async snapshotUpdateKeys(workflowName: string, runId: string): Promise<string[]> {
+    const key = this.snapshotKey('workflows', workflowName, runId);
+    const legacyKey = (await this.client.exists(key)) ? undefined : (await this.legacySnapshotKeys(key))[0];
+    // Both scripts read the canonical key first, including when another writer just migrated the run.
+    return [key, legacyKey ?? key];
+  }
+
   private async getWorkflowRunRecord({
     namespace,
     runId,
-    resourceId,
     workflowName,
   }: {
     namespace: string;
     runId: string;
-    resourceId?: string;
     workflowName?: string;
-  }) {
+  }): Promise<WorkflowRunRecord | null> {
     if (workflowName) {
-      const keyVariants: Array<Record<string, string>> = [
-        ...(resourceId ? [{ namespace, workflow_name: workflowName, run_id: runId, resourceId }] : []),
-        { namespace, workflow_name: workflowName, run_id: runId },
-      ];
+      const key = this.snapshotKey(namespace, workflowName, runId);
+      const record = await this.client.get<WorkflowRunRecord>(key);
+      if (record) return record;
 
-      for (const keys of keyVariants) {
-        const data = await this.#db.get<WorkflowRunRecord>({
-          tableName: TABLE_WORKFLOW_SNAPSHOT,
-          keys,
-        });
-        if (data) return data;
+      const legacyKeys = await this.legacySnapshotKeys(key);
+      for (const legacyKey of legacyKeys) {
+        const legacy = await this.client.get<WorkflowRunRecord>(legacyKey);
+        if (legacy?.run_id === runId && legacy.workflow_name === workflowName) return legacy;
       }
+      return null;
     }
 
-    const key = `${getKey(TABLE_WORKFLOW_SNAPSHOT, { namespace })}:*run_id:${runId}*`;
-    const keys = await this.#db.scanKeys(key);
-    const workflows = await Promise.all(
-      keys.map(async key => {
-        return this.client.get<WorkflowRunRecord>(key);
-      }),
-    );
-
-    return (
-      workflows.find(
-        w =>
-          w?.run_id === runId &&
-          (!workflowName || w.workflow_name === workflowName) &&
-          (!resourceId || w.resourceId === resourceId),
-      ) ?? null
-    );
+    const prefix = getKey(TABLE_WORKFLOW_SNAPSHOT, { namespace });
+    const runPattern = runId.replace(/[*?[\]\\]/g, '\\$&');
+    const keys = await this.#db.scanKeys(`${prefix}:*:run_id:${runPattern}*`);
+    const records = await Promise.all(keys.map(key => this.client.get<WorkflowRunRecord>(key)));
+    let legacy: WorkflowRunRecord | null = null;
+    for (const [index, record] of records.entries()) {
+      if (record?.run_id !== runId) continue;
+      if (keys[index] === this.snapshotKey(namespace, record.workflow_name, runId)) return record;
+      legacy ??= record;
+    }
+    return legacy;
   }
 
   async updateWorkflowResults({
@@ -249,11 +255,7 @@ export class WorkflowsUpstash extends WorkflowsStorage {
   }): Promise<Record<string, StepResult<any, any, any, any>>> {
     const check = this.#runFenceCheck(fence, runId, 'updateWorkflowResults');
     try {
-      const key = getKey(TABLE_WORKFLOW_SNAPSHOT, {
-        namespace: 'workflows',
-        workflow_name: workflowName,
-        run_id: runId,
-      });
+      const keys = await this.snapshotUpdateKeys(workflowName, runId);
 
       const now = new Date().toISOString();
 
@@ -273,7 +275,7 @@ export class WorkflowsUpstash extends WorkflowsStorage {
         local stateJson = ARGV[9]
 
         -- Get existing data
-        local existing = redis.call('GET', key)
+        local existing = redis.call('GET', key) or redis.call('GET', KEYS[2])
         local data
         local snapshot
 
@@ -345,7 +347,7 @@ export class WorkflowsUpstash extends WorkflowsStorage {
       const resultJson = await evalFenced(
         this.client,
         luaScript,
-        [key],
+        keys,
         [
           stepId,
           JSON.stringify(result),
@@ -397,11 +399,7 @@ export class WorkflowsUpstash extends WorkflowsStorage {
   }): Promise<WorkflowRunState | undefined> {
     const check = this.#runFenceCheck(fence, runId, 'updateWorkflowState');
     try {
-      const key = getKey(TABLE_WORKFLOW_SNAPSHOT, {
-        namespace: 'workflows',
-        workflow_name: workflowName,
-        run_id: runId,
-      });
+      const keys = await this.snapshotUpdateKeys(workflowName, runId);
 
       const now = new Date().toISOString();
 
@@ -414,7 +412,7 @@ export class WorkflowsUpstash extends WorkflowsStorage {
         local expectedStatusJson = ARGV[3]
 
         -- Get existing data
-        local existing = redis.call('GET', key)
+        local existing = redis.call('GET', key) or redis.call('GET', KEYS[2])
 
         if not existing then
           return nil
@@ -472,7 +470,7 @@ export class WorkflowsUpstash extends WorkflowsStorage {
       const resultJson = await evalFenced(
         this.client,
         luaScript,
-        [key],
+        keys,
         [JSON.stringify(state), now, expectedStatusJson],
         check,
       );
@@ -519,12 +517,8 @@ export class WorkflowsUpstash extends WorkflowsStorage {
     const check = this.#runFenceCheck(params.fence, runId, 'persistWorkflowSnapshot');
     try {
       const now = new Date();
-      const key = getKey(TABLE_WORKFLOW_SNAPSHOT, {
-        namespace,
-        workflow_name: workflowName,
-        run_id: runId,
-        ...(resourceId ? { resourceId } : {}),
-      });
+      const key = this.snapshotKey(namespace, workflowName, runId);
+      const legacyKey = resourceId ? `${key}:resourceId:${resourceId}` : key;
 
       const record = {
         namespace,
@@ -539,18 +533,21 @@ export class WorkflowsUpstash extends WorkflowsStorage {
       await evalFenced(
         this.client,
         `
-        local existing = redis.call("GET", KEYS[1])
+        local existing = redis.call("GET", KEYS[1]) or redis.call("GET", KEYS[2])
         local next = cjson.decode(ARGV[1])
         if existing then
           local current = cjson.decode(existing)
           if current["createdAt"] then
             next["createdAt"] = current["createdAt"]
           end
+          if not next["resourceId"] then
+            next["resourceId"] = current["resourceId"]
+          end
         end
         redis.call("SET", KEYS[1], cjson.encode(next))
         return 1
         `,
-        [key],
+        [key, legacyKey],
         [JSON.stringify(record)],
         check,
       );
@@ -638,15 +635,11 @@ export class WorkflowsUpstash extends WorkflowsStorage {
   }): Promise<void> {
     const check = this.#runFenceCheck(fence, runId, 'deleteWorkflowRunById');
     try {
-      const record = await this.getWorkflowRunRecord({ namespace: 'workflows', runId, workflowName });
-      const key = getKey(TABLE_WORKFLOW_SNAPSHOT, {
-        namespace: 'workflows',
-        workflow_name: workflowName,
-        run_id: runId,
-        ...(record?.resourceId ? { resourceId: record.resourceId } : {}),
-      });
+      const key = this.snapshotKey('workflows', workflowName, runId);
+      const legacyKeys = await this.legacySnapshotKeys(key);
       const batch = writeBatch(this.client, check);
       batch.del(key);
+      for (const legacyKey of legacyKeys) batch.del(legacyKey);
       await batch.exec();
     } catch (error) {
       if (isRunFenceConflictError(error)) throw error;
@@ -708,13 +701,15 @@ export class WorkflowsUpstash extends WorkflowsStorage {
       keys.forEach(key => pipeline.get(key));
       const results = await pipeline.exec();
 
-      // Filter and transform results - handle undefined results
-      let runs = results
-        .map((result: any) => result as Record<string, any> | null)
-        .filter(
-          (record): record is Record<string, any> =>
-            record !== null && record !== undefined && typeof record === 'object' && 'workflow_name' in record,
-        )
+      const recordsByRun = new Map<string, WorkflowRunRecord>();
+      results.forEach((result, index) => {
+        const record = result as WorkflowRunRecord | null;
+        if (!record || typeof record !== 'object' || !('workflow_name' in record)) return;
+        const key = this.snapshotKey('workflows', record.workflow_name, record.run_id);
+        if (!recordsByRun.has(key) || keys[index] === key) recordsByRun.set(key, record);
+      });
+
+      let runs = [...recordsByRun.values()]
         // Only filter by workflowName if it was specifically requested
         .filter(record => !workflowName || record.workflow_name === workflowName)
         .filter(record => !resourceId || record.resourceId === resourceId)

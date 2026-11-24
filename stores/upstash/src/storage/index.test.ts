@@ -6,12 +6,14 @@ import {
   createDomainDirectTests,
 } from '@internal/storage-test-utils';
 import type { MastraDBMessage, StorageThreadType } from '@mastra/core/memory';
+import { TABLE_WORKFLOW_SNAPSHOT } from '@mastra/core/storage';
 import type { WorkflowRunState } from '@mastra/core/workflows';
 import { Redis } from '@upstash/redis';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { StoreMemoryUpstash } from './domains/memory';
 import { ScoresUpstash } from './domains/scores';
+import { getKey } from './domains/utils';
 import { WorkflowsUpstash } from './domains/workflows';
 import { UpstashStore } from './index';
 
@@ -404,3 +406,51 @@ describe('WorkflowsUpstash.persistWorkflowSnapshot', () => {
     await expect(workflowsDomain.getWorkflowRunById({ runId, workflowName })).resolves.toBeNull();
   });
 });
+
+it.each(['current', 'legacy'])(
+  'updates and deletes one Upstash snapshot for a %s resource-scoped run',
+  async layout => {
+    const client = createTestClient();
+    const workflows = new WorkflowsUpstash({ client });
+    const workflowName = randomUUID();
+    const runId = randomUUID();
+    const resourceId = 'customer-1';
+    const identity = { workflowName, runId };
+    const snapshot = createWorkflowSnapshot(runId, 'suspended');
+    const createdAt = new Date('2025-03-04T00:00:00Z');
+
+    if (layout === 'legacy') {
+      const fields = { namespace: 'workflows', workflow_name: workflowName, run_id: runId, resourceId };
+      await client.set(getKey(TABLE_WORKFLOW_SNAPSHOT, fields), {
+        ...fields,
+        snapshot,
+        createdAt: createdAt.toISOString(),
+        updatedAt: createdAt.toISOString(),
+      });
+    } else {
+      await workflows.persistWorkflowSnapshot({ ...identity, resourceId, snapshot, createdAt });
+    }
+
+    try {
+      await workflows.updateWorkflowState({ ...identity, opts: { status: 'running' } });
+      expect.soft(await workflows.loadWorkflowSnapshot({ ...identity, namespace: 'workflows' })).toMatchObject({
+        status: 'running',
+      });
+
+      await workflows.updateWorkflowResults({
+        ...identity,
+        stepId: 'step',
+        result: { status: 'success', output: 'saved' },
+        requestContext: {},
+      });
+      expect
+        .soft((await workflows.listWorkflowRuns({ workflowName })).runs)
+        .toMatchObject([
+          { runId, resourceId, createdAt, snapshot: { status: 'running', context: { step: { output: 'saved' } } } },
+        ]);
+    } finally {
+      await workflows.deleteWorkflowRunById(identity);
+    }
+    expect(await workflows.getWorkflowRunById(identity)).toBeNull();
+  },
+);
