@@ -248,6 +248,8 @@ export class InngestRun<
   }
 
   async cancel() {
+    if (await this.hasReachedTerminalStatus()) return;
+
     const storage = this.#mastra?.getStorage();
 
     await this.inngest.send({
@@ -262,15 +264,15 @@ export class InngestRun<
       workflowName: this.workflowId,
       runId: this.runId,
     });
-    if (snapshot) {
+    // The worker may finish while the cancel event is being sent.
+    if (snapshot && !(await this.hasReachedTerminalStatus())) {
       await workflowsStore?.persistWorkflowSnapshot({
         workflowName: this.workflowId,
         runId: this.runId,
         resourceId: this.resourceId,
         snapshot: {
           ...snapshot,
-          status: 'canceled' as any,
-          value: snapshot.value,
+          status: 'canceled',
         },
       });
     }
