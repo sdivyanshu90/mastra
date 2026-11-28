@@ -6,6 +6,7 @@ import {
   defineSignal,
   executeChild,
   isCancellation,
+  patched,
   proxyActivities,
   log,
   setHandler,
@@ -248,6 +249,13 @@ export class TemporalExecutionEngine {
           const childResult = await executeChild(entry.workflowType, {
             args: [{ inputData, ...this.executionContext }],
           });
+          if (
+            childResult?.status === 'success' &&
+            childResult.result == null &&
+            patched('mastra-nullish-child-output-v1')
+          ) {
+            return childResult.result;
+          }
           return childResult?.result ?? childResult;
         });
       }

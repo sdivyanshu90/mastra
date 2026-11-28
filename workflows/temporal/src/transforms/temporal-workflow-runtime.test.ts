@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const executeChild = vi.fn();
 const proxyActivities = vi.fn();
+const patched = vi.fn(() => true);
 const sleep = vi.fn(async () => {});
 const logInfo = vi.fn();
 const defineQuery = vi.fn((name: string) => name);
@@ -21,6 +22,7 @@ vi.mock('@temporalio/workflow', async importOriginal => {
     ApplicationFailure,
     TemporalFailure,
     isCancellation: () => false,
+    patched,
     condition,
     defineQuery,
     defineSignal,
@@ -46,6 +48,7 @@ const succeeded = (output: unknown) =>
 describe('temporal workflow runtime helper module', () => {
   beforeEach(() => {
     executeChild.mockReset();
+    patched.mockReturnValue(true);
     proxyActivities.mockReset();
     sleep.mockClear();
     logInfo.mockClear();
@@ -402,6 +405,31 @@ describe('temporal workflow runtime helper module', () => {
         'child-workflow': succeeded({ city: 'SF', child: true }),
       },
     });
+  });
+
+  it.each([null, undefined])('passes child output %s to the following step', async value => {
+    executeChild.mockResolvedValue({ status: 'success', result: value, steps: {} });
+    const receive = vi.fn(async ({ inputData }) => ({ received: inputData }));
+    proxyActivities.mockReturnValue({ receive });
+
+    const { createWorkflow } = await import('./temporal-workflow-runtime.mjs');
+    const workflow = createWorkflow('parent').thenWorkflow('ChildWorkflow', 'child').then('receive').commit();
+    const result = await workflow({ inputData: {} });
+
+    expect(result.result).toEqual({ received: value });
+    expect(result.steps.child).toEqual(succeeded(value));
+  });
+
+  it('replays the legacy child result shape for unpatched histories', async () => {
+    patched.mockReturnValue(false);
+    const envelope = { status: 'success', result: null, steps: {} };
+    executeChild.mockResolvedValue(envelope);
+    proxyActivities.mockReturnValue({});
+
+    const { createWorkflow } = await import('./temporal-workflow-runtime.mjs');
+    const workflow = createWorkflow('parent').thenWorkflow('ChildWorkflow', 'child').commit();
+
+    expect((await workflow({ inputData: {} })).result).toEqual(envelope);
   });
 
   it('supports delay entries in the workflow graph', async () => {

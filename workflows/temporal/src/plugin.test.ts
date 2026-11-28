@@ -59,6 +59,7 @@ async function writeTemporalWorkflowShim(projectRoot: string): Promise<void> {
       export const executeChild = (...args) => getMock().executeChild(...args);
       export const proxyActivities = (...args) => getMock().proxyActivities(...args);
       export const setHandler = (...args) => getMock().setHandler(...args);
+      export const patched = () => true;
       export const sleep = (...args) => getMock().sleep(...args);
       export const log = { info: (...args) => getMock().log.info(...args) };
     `,

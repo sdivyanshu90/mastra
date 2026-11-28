@@ -1,4 +1,4 @@
-import { defineSignal, defineQuery, proxyActivities, setHandler, isCancellation, TemporalFailure, ApplicationFailure, condition, log, sleep, executeChild } from '@temporalio/workflow';
+import { defineSignal, defineQuery, proxyActivities, setHandler, isCancellation, TemporalFailure, ApplicationFailure, condition, log, sleep, executeChild, patched } from '@temporalio/workflow';
 
 const resumeSignal = defineSignal('mastra.resume');
 const statusQuery = defineQuery('mastra.status');
@@ -256,6 +256,9 @@ class TemporalExecutionEngine {
                 ...this.executionContext
               }]
             });
+            if (childResult?.status === 'success' && childResult.result == null && patched('mastra-nullish-child-output-v1')) {
+              return childResult.result;
+            }
             return childResult?.result ?? childResult;
           });
         }
