@@ -108,6 +108,20 @@ describe('workflow transform', () => {
     expect(result).toContain("createWorkflow('weather-workflow')");
   });
 
+  it('keeps named deadline activities distinct from literal dates', async () => {
+    const result = await transform(`
+      import { createWorkflow } from '@mastra/core/workflows';
+      const jan1 = async () => new Date();
+      export const deadline = createWorkflow({ id: 'deadline' })
+        .sleepUntil(jan1)
+        .sleepUntil(new Date('2030-01-01T00:00:00Z'))
+        .commit();
+    `);
+
+    expect(result).toMatch(/\.sleepUntilActivity\(['"]jan1['"]\)/);
+    expect(result).toMatch(/\.sleepUntil\(new Date\(['"]2030-01-01T00:00:00Z['"]\)\)/);
+  });
+
   it('exports workflows using the normalized workflow id name', async () => {
     const result = await transform(`
       import { createWorkflow } from '@mastra/core/workflows';

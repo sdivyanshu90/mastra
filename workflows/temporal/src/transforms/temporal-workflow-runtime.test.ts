@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const executeChild = vi.fn();
 const proxyActivities = vi.fn();
+const patched = vi.fn(() => true);
 const sleep = vi.fn(async () => {});
 const logInfo = vi.fn();
 const defineQuery = vi.fn((name: string) => name);
@@ -21,6 +22,7 @@ vi.mock('@temporalio/workflow', async importOriginal => {
     ApplicationFailure,
     TemporalFailure,
     isCancellation: () => false,
+    patched,
     condition,
     defineQuery,
     defineSignal,
@@ -46,6 +48,7 @@ const succeeded = (output: unknown) =>
 describe('temporal workflow runtime helper module', () => {
   beforeEach(() => {
     executeChild.mockReset();
+    patched.mockReturnValue(true);
     proxyActivities.mockReset();
     sleep.mockClear();
     logInfo.mockClear();
@@ -415,6 +418,24 @@ describe('temporal workflow runtime helper module', () => {
 
     expect(sleep).toHaveBeenCalledWith(250);
     expect(logInfo).toHaveBeenCalledWith('sleep', expect.objectContaining({ duration: 250 }));
+  });
+
+  it.each([true, false])('resolves a date-like activity name on the appropriate history (%s)', async newHistory => {
+    patched.mockReturnValue(newHistory);
+    const date = new Date('2030-06-01T12:00:00Z');
+    const jan1 = vi.fn(async () => date.toISOString());
+    proxyActivities.mockReturnValue({ jan1 });
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(date.getTime() - 60_000);
+
+    try {
+      const { createWorkflow } = await import('./temporal-workflow-runtime.mjs');
+      await createWorkflow('deadline').sleepUntilActivity('jan1').commit()({ inputData: {} });
+
+      expect(jan1).toHaveBeenCalledTimes(newHistory ? 1 : 0);
+      expect(sleep).toHaveBeenCalledWith(newHistory ? 60_000 : 0);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('executes parallel entries and merges results by step id', async () => {

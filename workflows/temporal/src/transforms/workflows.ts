@@ -418,7 +418,7 @@ function rewriteChainMethod(
           `.sleepUntil() in ${workflowName} (${filePath}) must be a Date, string/number literal, or an identifier`,
         );
       }
-      return rewritten([t.stringLiteral(name)]);
+      return rewritten([t.stringLiteral(name)], 'sleepUntilActivity');
     }
 
     case 'parallel': {

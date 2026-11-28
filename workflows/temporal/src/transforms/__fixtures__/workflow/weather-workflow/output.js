@@ -1,4 +1,4 @@
-import { defineSignal, defineQuery, proxyActivities, setHandler, isCancellation, TemporalFailure, ApplicationFailure, condition, log, sleep, executeChild } from '@temporalio/workflow';
+import { defineSignal, defineQuery, proxyActivities, setHandler, isCancellation, TemporalFailure, ApplicationFailure, condition, log, patched, sleep, executeChild } from '@temporalio/workflow';
 
 const resumeSignal = defineSignal('mastra.resume');
 const statusQuery = defineQuery('mastra.status');
@@ -280,7 +280,10 @@ class TemporalExecutionEngine {
         }
       case 'sleepUntil':
         {
-          const date = entry.date != null ? new Date(entry.date) : entry.fn ? new Date(await this.activityHandle[entry.fn](this.activityParams(inputData))) : new Date();
+          // Older generated workflows treated date-like activity names as literal dates.
+          const legacyDate = entry.fn ? Date.parse(entry.fn) : NaN;
+          const dateLiteral = !Number.isNaN(legacyDate) && !patched('mastra-sleep-until-activity-v1') ? legacyDate : entry.date;
+          const date = dateLiteral != null ? new Date(dateLiteral) : entry.fn ? new Date(await this.activityHandle[entry.fn](this.activityParams(inputData))) : new Date();
           log.info('sleepUntil', {
             id: entry.id,
             date: date.toISOString()
@@ -494,6 +497,14 @@ function createWorkflow(workflowId, options) {
           fn: dateOrFnId
         });
       }
+      return workflow;
+    },
+    sleepUntilActivity(activityId) {
+      stepFlow.push({
+        type: 'sleepUntil',
+        id: nextId('sleepUntil'),
+        fn: activityId
+      });
       return workflow;
     },
     parallel(entries) {

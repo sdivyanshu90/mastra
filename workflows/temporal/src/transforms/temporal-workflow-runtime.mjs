@@ -6,6 +6,7 @@ import {
   defineSignal,
   executeChild,
   isCancellation,
+  patched,
   proxyActivities,
   log,
   setHandler,
@@ -268,9 +269,13 @@ export class TemporalExecutionEngine {
       }
 
       case 'sleepUntil': {
+        // Older generated workflows treated date-like activity names as literal dates.
+        const legacyDate = entry.fn ? Date.parse(entry.fn) : NaN;
+        const dateLiteral =
+          !Number.isNaN(legacyDate) && !patched('mastra-sleep-until-activity-v1') ? legacyDate : entry.date;
         const date =
-          entry.date != null
-            ? new Date(entry.date)
+          dateLiteral != null
+            ? new Date(dateLiteral)
             : entry.fn
               ? new Date(await this.activityHandle[entry.fn](this.activityParams(inputData)))
               : new Date();
@@ -503,6 +508,10 @@ export function createWorkflow(workflowId, options) {
           fn: dateOrFnId,
         });
       }
+      return workflow;
+    },
+    sleepUntilActivity(activityId) {
+      stepFlow.push({ type: 'sleepUntil', id: nextId('sleepUntil'), fn: activityId });
       return workflow;
     },
     parallel(entries) {
